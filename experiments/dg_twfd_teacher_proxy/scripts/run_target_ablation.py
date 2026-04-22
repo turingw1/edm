@@ -28,6 +28,7 @@ def main() -> None:
     parser.add_argument("--eval-batch", type=int, default=None, help="Override match/defect batch size.")
     parser.add_argument("--fid-batch", type=int, default=None, help="Override FID batch size.")
     parser.add_argument("--fp32", action="store_true", help="Disable FP16 network execution.")
+    parser.add_argument("--skip-edm-baseline", action="store_true", help="Skip official EDM 4-step baseline FID.")
     parser.add_argument("--skip-fid", action="store_true", help="Generate samples and metrics without FID.")
     parser.add_argument("--skip-generate", action="store_true", help="Skip sample generation and reuse existing images.")
     parser.add_argument("--skip-metrics", action="store_true", help="Skip match_mse and defect.")
@@ -39,6 +40,7 @@ def main() -> None:
         TARGETS,
         edm_root_from_file,
         evaluate_targets_match_and_defect,
+        generate_edm_baseline_samples,
         generate_target_samples,
         load_edm_network,
         resolve_path,
@@ -99,6 +101,45 @@ def main() -> None:
         "use_fp16": use_fp16,
         "targets": {},
     }
+
+    if not args.skip_edm_baseline:
+        print("\n=== DG_TWFD official EDM 4-step baseline ===")
+        edm_sample_dir = samples_dir / "DG_TWFD_edm_steps4"
+        edm_metrics = {
+            "target": "edm",
+            "fid4": None,
+            "defect": None,
+            "match_mse": None,
+            "sample_dir": str(edm_sample_dir),
+        }
+        start = time.time()
+        if not args.skip_generate:
+            generate_edm_baseline_samples(
+                edm_root=edm_root,
+                network=cfg["checkpoint"],
+                outdir=edm_sample_dir,
+                num_samples=int(cfg["num_samples"]),
+                seed=int(cfg["seed"]),
+                batch_size=int(cfg["batch"]),
+                num_steps=int(cfg["generation_steps"]),
+                subdirs=bool(cfg.get("subdirs", True)),
+                class_idx=cfg.get("class_idx"),
+                log_path=logs_dir / "DG_TWFD_generate_edm_steps4.log",
+                dry_run=args.dry_run,
+            )
+        if not args.skip_fid:
+            edm_metrics["fid4"] = run_fid(
+                edm_root=edm_root,
+                images=edm_sample_dir,
+                ref=cfg["fid_ref"],
+                num_samples=int(cfg["num_samples"]),
+                batch_size=int(cfg["fid_batch"]),
+                log_path=logs_dir / "DG_TWFD_fid_edm_steps4.log",
+                dry_run=args.dry_run,
+            )
+        edm_metrics["elapsed_sec"] = time.time() - start
+        metrics["targets"]["edm"] = edm_metrics
+        write_json(run_dir / "metrics.json", metrics)
 
     shared_metric_values = {}
     if not args.skip_metrics:

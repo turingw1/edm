@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 
 
-TARGET_ORDER = ("velocity", "residual", "endpoint")
+TARGET_ORDER = ("edm", "velocity", "residual", "endpoint")
 
 
 def load_json(path: str | Path) -> dict:

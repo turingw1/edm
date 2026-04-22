@@ -268,6 +268,36 @@ def save_image_batch(images: torch.Tensor, *, batch_seeds: list[int], outdir: Pa
             PIL.Image.fromarray(image_np, "RGB").save(image_path)
 
 
+def generate_edm_baseline_samples(
+    *,
+    edm_root: Path,
+    network: str,
+    outdir: Path,
+    num_samples: int,
+    seed: int,
+    batch_size: int,
+    num_steps: int,
+    subdirs: bool,
+    class_idx: int | None,
+    log_path: Path,
+    dry_run: bool,
+) -> None:
+    command = [
+        sys.executable,
+        "generate.py",
+        f"--network={network}",
+        f"--outdir={outdir}",
+        f"--seeds={seed}-{seed + num_samples - 1}",
+        f"--batch={batch_size}",
+        f"--steps={num_steps}",
+    ]
+    if subdirs:
+        command.append("--subdirs")
+    if class_idx is not None:
+        command.append(f"--class={class_idx}")
+    run_command(command, cwd=edm_root, log_path=log_path, dry_run=dry_run)
+
+
 @torch.no_grad()
 def evaluate_match_and_defect(
     net,

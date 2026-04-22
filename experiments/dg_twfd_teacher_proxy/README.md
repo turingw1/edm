@@ -10,6 +10,10 @@ Only the target space changes. The EDM checkpoint, online reference rollout,
 time sampler, 4-step generation schedule, FID evaluator, seeds, and target-space
 approximation rule are fixed.
 
+The script also reports an `edm` row from the unmodified EDM `generate.py`
+4-step sampler. This is a sanity baseline for checking whether the checkpoint,
+FID reference, generated-image directory, and evaluator are wired correctly.
+
 ## Targets
 
 For each source state `x_t` and cleaner target time `s`, EDM online Heun rollout
@@ -200,5 +204,8 @@ The CSV fields are:
 ```text
 dataset,target,fid4,defect,match_mse,checkpoint,sampler_name,num_samples,seed
 ```
+
+The `edm` row has only `FID@4`; `defect` and `match_mse` are blank because it is
+the unmodified sampler baseline rather than a target-space induced map.
 
 These CSV files are intended to feed the final paper table directly.
