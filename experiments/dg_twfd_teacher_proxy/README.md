@@ -75,8 +75,33 @@ Recommended server setup:
 ```bash
 cd /data2/yl7622/Zhengwei/DG-TWFD/refs/edm
 conda activate dg
+export PYTHONPATH="$PWD:${PYTHONPATH:-}"
 export DNNLIB_CACHE_DIR=/data2/yl7622/Zhengwei/DG-TWFD/.cache/dnnlib
 mkdir -p "$DNNLIB_CACHE_DIR"
+```
+
+`dnnlib` is a local module inside the EDM repository. If `import dnnlib` fails,
+you are either not running from `refs/edm` or `PYTHONPATH` does not include the
+EDM root. Check the environment before prefetching:
+
+```bash
+python - <<'PY'
+import dnnlib
+import torch
+import PIL
+import scipy
+print("dnnlib:", dnnlib.__file__)
+print("torch:", torch.__version__)
+print("cuda:", torch.cuda.is_available())
+PY
+```
+
+If any non-`dnnlib` import fails, install the EDM dependencies in the active
+environment:
+
+```bash
+python -m pip install click tqdm pillow scipy requests psutil
+python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 ```
 
 Optional prefetch command:
