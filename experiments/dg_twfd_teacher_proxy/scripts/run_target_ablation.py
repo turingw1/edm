@@ -28,7 +28,7 @@ def main() -> None:
     parser.add_argument("--eval-batch", type=int, default=None, help="Override match/defect batch size.")
     parser.add_argument("--fid-batch", type=int, default=None, help="Override FID batch size.")
     parser.add_argument("--fp32", action="store_true", help="Disable FP16 network execution.")
-    parser.add_argument("--skip-edm-baseline", action="store_true", help="Skip official EDM 4-step baseline FID.")
+    parser.add_argument("--skip-edm-baseline", action="store_true", help="Skip official EDM baseline FID.")
     parser.add_argument("--skip-fid", action="store_true", help="Generate samples and metrics without FID.")
     parser.add_argument("--skip-generate", action="store_true", help="Skip sample generation and reuse existing images.")
     parser.add_argument("--skip-metrics", action="store_true", help="Skip match_mse and defect.")
@@ -94,6 +94,8 @@ def main() -> None:
         "num_samples": int(cfg["num_samples"]),
         "seed": int(cfg["seed"]),
         "generation_steps": int(cfg["generation_steps"]),
+        "official_edm_steps": int(cfg.get("official_edm_steps", cfg["generation_steps"])),
+        "official_edm_sampler_kwargs": dict(cfg.get("official_edm_sampler_kwargs", {})),
         "approximation": approx_cfg,
         "batch": int(cfg["batch"]),
         "eval_batch": int(cfg["eval_batch"]),
@@ -103,13 +105,16 @@ def main() -> None:
     }
 
     if not args.skip_edm_baseline:
-        print("\n=== DG_TWFD official EDM 4-step baseline ===")
-        edm_sample_dir = samples_dir / "DG_TWFD_edm_steps4"
+        official_edm_steps = int(cfg.get("official_edm_steps", cfg["generation_steps"]))
+        print(f"\n=== DG_TWFD official EDM {official_edm_steps}-step baseline ===")
+        edm_sample_dir = samples_dir / f"DG_TWFD_edm_steps{official_edm_steps}"
         edm_metrics = {
             "target": "edm",
             "fid4": None,
             "defect": None,
             "match_mse": None,
+            "steps": official_edm_steps,
+            "sampler_kwargs": dict(cfg.get("official_edm_sampler_kwargs", {})),
             "sample_dir": str(edm_sample_dir),
         }
         start = time.time()
@@ -121,10 +126,11 @@ def main() -> None:
                 num_samples=int(cfg["num_samples"]),
                 seed=int(cfg["seed"]),
                 batch_size=int(cfg["batch"]),
-                num_steps=int(cfg["generation_steps"]),
+                num_steps=official_edm_steps,
+                sampler_kwargs=dict(cfg.get("official_edm_sampler_kwargs", {})),
                 subdirs=bool(cfg.get("subdirs", True)),
                 class_idx=cfg.get("class_idx"),
-                log_path=logs_dir / "DG_TWFD_generate_edm_steps4.log",
+                log_path=logs_dir / f"DG_TWFD_generate_edm_steps{official_edm_steps}.log",
                 dry_run=args.dry_run,
             )
         if not args.skip_fid:
@@ -134,7 +140,7 @@ def main() -> None:
                 ref=cfg["fid_ref"],
                 num_samples=int(cfg["num_samples"]),
                 batch_size=int(cfg["fid_batch"]),
-                log_path=logs_dir / "DG_TWFD_fid_edm_steps4.log",
+                log_path=logs_dir / f"DG_TWFD_fid_edm_steps{official_edm_steps}.log",
                 dry_run=args.dry_run,
             )
         edm_metrics["elapsed_sec"] = time.time() - start

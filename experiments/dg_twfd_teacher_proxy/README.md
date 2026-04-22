@@ -11,8 +11,9 @@ time sampler, 4-step generation schedule, FID evaluator, seeds, and target-space
 approximation rule are fixed.
 
 The script also reports an `edm` row from the unmodified EDM `generate.py`
-4-step sampler. This is a sanity baseline for checking whether the checkpoint,
-FID reference, generated-image directory, and evaluator are wired correctly.
+sampler using the official EDM step count from the config. This is a sanity
+baseline for checking whether the checkpoint, FID reference, generated-image
+directory, and evaluator are wired correctly.
 
 ## Targets
 
@@ -142,6 +143,10 @@ machine that shares the same cache directory.
 
 ## CIFAR-10
 
+The target-proxy ablation uses `generation_steps=4`. The `edm` sanity baseline
+uses the official EDM CIFAR-10 setting `official_edm_steps=18`, corresponding
+to 35 denoiser evaluations under Heun sampling.
+
 Smoke run:
 
 ```bash
@@ -166,6 +171,9 @@ python experiments/dg_twfd_teacher_proxy/scripts/run_target_ablation.py \
 ## ImageNet64
 
 ImageNet64 is optional and uses the public conditional ADM EDM checkpoint:
+its `edm` sanity baseline follows the EDM example setting
+`official_edm_steps=256`, `S_churn=40`, `S_min=0.05`, `S_max=50`, and
+`S_noise=1.003`.
 
 ```bash
 python experiments/dg_twfd_teacher_proxy/scripts/run_target_ablation.py \
@@ -205,7 +213,9 @@ The CSV fields are:
 dataset,target,fid4,defect,match_mse,checkpoint,sampler_name,num_samples,seed
 ```
 
-The `edm` row has only `FID@4`; `defect` and `match_mse` are blank because it is
-the unmodified sampler baseline rather than a target-space induced map.
+The `edm` row has only FID; `defect` and `match_mse` are blank because it is the
+unmodified sampler baseline rather than a target-space induced map. Its step
+count is controlled by `official_edm_steps`, while the proxy rows use
+`generation_steps=4`.
 
 These CSV files are intended to feed the final paper table directly.

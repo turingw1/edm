@@ -277,6 +277,7 @@ def generate_edm_baseline_samples(
     seed: int,
     batch_size: int,
     num_steps: int,
+    sampler_kwargs: dict,
     subdirs: bool,
     class_idx: int | None,
     log_path: Path,
@@ -291,6 +292,9 @@ def generate_edm_baseline_samples(
         f"--batch={batch_size}",
         f"--steps={num_steps}",
     ]
+    for key, value in sorted((sampler_kwargs or {}).items()):
+        if value is not None:
+            command.append(f"--{key}={value}")
     if subdirs:
         command.append("--subdirs")
     if class_idx is not None:

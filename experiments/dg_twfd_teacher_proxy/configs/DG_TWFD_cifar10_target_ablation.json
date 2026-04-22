@@ -10,6 +10,8 @@
   "eval_num_triplets": 1024,
   "seed": 42,
   "generation_steps": 4,
+  "official_edm_steps": 18,
+  "official_edm_sampler_kwargs": {},
   "transition_grid_steps": 18,
   "batch": 512,
   "eval_batch": 256,
