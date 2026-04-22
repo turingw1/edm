@@ -11,9 +11,10 @@
   "seed": 42,
   "generation_steps": 4,
   "transition_grid_steps": 18,
-  "batch": 64,
-  "eval_batch": 32,
-  "fid_batch": 64,
+  "batch": 512,
+  "eval_batch": 256,
+  "fid_batch": 512,
+  "use_fp16": true,
   "class_idx": null,
   "subdirs": true,
   "sigma_min": 0.002,
@@ -22,8 +23,8 @@
   "defect_eps": 1.0e-8,
   "approximation": {
     "name": "DG_TWFD_blockavg_quantized_target",
-    "block_size": 4,
+    "block_size": 1,
     "quant_bits": 8,
-    "clip": 2.0
+    "clip": 8.0
   }
 }

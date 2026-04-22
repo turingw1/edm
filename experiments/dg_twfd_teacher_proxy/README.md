@@ -30,9 +30,11 @@ residual: M(t,s,x_t) = x_t + A(z)
 velocity: M(t,s,x_t) = x_t - (t - s) A(z)
 ```
 
-`A` is shared across targets and defaults to block averaging plus fixed-range
-uniform quantization. This is a capacity-limited teacher proxy, not a trained
-student.
+`A` is shared across targets and defaults to fixed-range uniform quantization.
+Optional block averaging can be enabled in the config, but the default keeps
+`block_size=1` because spatial block averaging destroys CIFAR-10 sample quality
+and is too severe for the FID@4 proxy. This is a capacity-limited teacher proxy,
+not a trained student.
 
 ## Metrics
 
@@ -142,7 +144,10 @@ Smoke run:
 python experiments/dg_twfd_teacher_proxy/scripts/run_target_ablation.py \
   --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_cifar10_target_ablation.json \
   --num-samples 128 \
-  --eval-num-triplets 128
+  --eval-num-triplets 128 \
+  --batch 512 \
+  --eval-batch 256 \
+  --fid-batch 512
 ```
 
 Larger run:

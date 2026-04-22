@@ -58,12 +58,14 @@ def resolve_path(path: str | Path, *, root: Path) -> Path:
     return path if path.is_absolute() else root / path
 
 
-def load_edm_network(network_pkl: str, *, device: torch.device):
+def load_edm_network(network_pkl: str, *, device: torch.device, use_fp16: bool = False):
     import dnnlib
 
     print(f'Loading EDM network from "{network_pkl}"...')
     with dnnlib.util.open_url(network_pkl) as f:
         net = pickle.load(f)["ema"].to(device)
+    if hasattr(net, "use_fp16") and device.type == "cuda":
+        net.use_fp16 = bool(use_fp16)
     net.eval().requires_grad_(False)
     return net
 
@@ -110,9 +112,9 @@ def _append_dims(value: torch.Tensor, ndim: int) -> torch.Tensor:
 def reference_transition(net, x_t: torch.Tensor, t: torch.Tensor, s: torch.Tensor, class_labels=None) -> torch.Tensor:
     """Deterministic EDM Heun transition from sigma t to sigma s."""
 
-    x_t = x_t.to(torch.float64)
-    t = torch.as_tensor(t, dtype=torch.float64, device=x_t.device).reshape(-1)
-    s = torch.as_tensor(s, dtype=torch.float64, device=x_t.device).reshape(-1)
+    x_t = x_t.to(torch.float32)
+    t = torch.as_tensor(t, dtype=x_t.dtype, device=x_t.device).reshape(-1)
+    s = torch.as_tensor(s, dtype=x_t.dtype, device=x_t.device).reshape(-1)
     if t.numel() == 1:
         t = t.expand(x_t.shape[0])
     if s.numel() == 1:
@@ -122,7 +124,7 @@ def reference_transition(net, x_t: torch.Tensor, t: torch.Tensor, s: torch.Tenso
     if (s < 0).any() or (s > t).any():
         raise ValueError("reference_transition expects 0 <= s <= t in EDM sigma time")
 
-    denoised = net(x_t, t, class_labels).to(torch.float64)
+    denoised = net(x_t, t, class_labels).to(x_t.dtype)
     d_cur = (x_t - denoised) / _append_dims(t, x_t.ndim)
     x_euler = x_t + _append_dims(s - t, x_t.ndim) * d_cur
 
@@ -132,7 +134,7 @@ def reference_transition(net, x_t: torch.Tensor, t: torch.Tensor, s: torch.Tenso
 
     x_next = x_euler.clone()
     labels_subset = class_labels[mask] if class_labels is not None else None
-    denoised_next = net(x_euler[mask], s[mask], labels_subset).to(torch.float64)
+    denoised_next = net(x_euler[mask], s[mask], labels_subset).to(x_t.dtype)
     d_next = (x_euler[mask] - denoised_next) / _append_dims(s[mask], x_t.ndim)
     x_next[mask] = x_t[mask] + _append_dims(s[mask] - t[mask], x_t.ndim) * (0.5 * d_cur[mask] + 0.5 * d_next)
     return x_next
@@ -240,7 +242,7 @@ def generate_target_samples(
         rnd = StackedRandomGenerator(device, batch_seeds)
         latents = rnd.randn([cur_batch, net.img_channels, net.img_resolution, net.img_resolution], device=device)
         class_labels = make_class_labels(net, rnd, cur_batch, device, class_idx)
-        x = latents.to(torch.float64) * t_steps[0]
+        x = latents * t_steps[0].to(latents.dtype)
         for t_cur, t_next in zip(t_steps[:-1], t_steps[1:]):
             x, _ = apply_induced_map(
                 net,
@@ -365,6 +367,114 @@ def evaluate_match_and_defect(
     return {
         "match_mse": total_match / max(total_count, 1),
         "defect": total_defect / max(total_count, 1),
+    }
+
+
+@torch.no_grad()
+def evaluate_targets_match_and_defect(
+    net,
+    *,
+    targets: list[str],
+    num_triplets: int,
+    seed: int,
+    batch_size: int,
+    transition_grid_steps: int,
+    sigma_min: float,
+    sigma_max: float,
+    rho: float,
+    approx_cfg: dict,
+    class_idx: int | None,
+    defect_eps: float,
+    device: torch.device,
+) -> dict[str, dict[str, float]]:
+    """Evaluate all target spaces using one shared set of EDM reference rollouts."""
+
+    for target in targets:
+        if target not in TARGETS:
+            raise ValueError(f"Unsupported target: {target}")
+
+    t_grid = edm_sigma_schedule(
+        net,
+        num_steps=transition_grid_steps,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
+        rho=rho,
+        device=device,
+    )
+    num_grid = int(t_grid.numel())
+    if num_grid < 4:
+        raise ValueError("transition_grid_steps must produce at least 4 grid points")
+
+    totals = {target: {"match_mse": 0.0, "defect": 0.0} for target in targets}
+    total_count = 0
+    rng = torch.Generator(device).manual_seed(int(seed) + 919)
+
+    for start in range(0, num_triplets, batch_size):
+        cur_batch = min(batch_size, num_triplets - start)
+        batch_seeds = list(range(seed + 100000 + start, seed + 100000 + start + cur_batch))
+        rnd = StackedRandomGenerator(device, batch_seeds)
+        latents = rnd.randn([cur_batch, net.img_channels, net.img_resolution, net.img_resolution], device=device)
+        class_labels = make_class_labels(net, rnd, cur_batch, device, class_idx)
+
+        states = [latents * t_grid[0].to(latents.dtype)]
+        for t_cur, t_next in zip(t_grid[:-1], t_grid[1:]):
+            states.append(reference_transition(net, states[-1], t_cur, t_next, class_labels))
+        state_grid = torch.stack(states, dim=1)
+
+        i_idx = torch.randint(0, num_grid - 2, [cur_batch], generator=rng, device=device)
+        j_idx = torch.empty_like(i_idx)
+        k_idx = torch.empty_like(i_idx)
+        for row in range(cur_batch):
+            j_idx[row] = torch.randint(int(i_idx[row].item()) + 1, num_grid - 1, [1], generator=rng, device=device)
+            k_idx[row] = torch.randint(int(j_idx[row].item()) + 1, num_grid, [1], generator=rng, device=device)
+
+        batch_rows = torch.arange(cur_batch, device=device)
+        x_t = state_grid[batch_rows, i_idx]
+        t = t_grid[i_idx]
+        s = t_grid[j_idx]
+        r = t_grid[k_idx]
+
+        x_s_ref = reference_transition(net, x_t, t, s, class_labels)
+        x_r_ref = reference_transition(net, x_t, t, r, class_labels)
+        denominator = float(defect_eps) + mse_per_sample(x_r_ref, x_t)
+
+        for target in targets:
+            x_s_map = induced_transition_from_reference(
+                target=target,
+                x_t=x_t,
+                x_s_ref=x_s_ref,
+                t=t,
+                s=s,
+                approx_cfg=approx_cfg,
+            )
+            direct = induced_transition_from_reference(
+                target=target,
+                x_t=x_t,
+                x_s_ref=x_r_ref,
+                t=t,
+                s=r,
+                approx_cfg=approx_cfg,
+            )
+            x_r_from_s_ref = reference_transition(net, x_s_map, s, r, class_labels)
+            composed = induced_transition_from_reference(
+                target=target,
+                x_t=x_s_map,
+                x_s_ref=x_r_from_s_ref,
+                t=s,
+                s=r,
+                approx_cfg=approx_cfg,
+            )
+            totals[target]["match_mse"] += float(mse_per_sample(x_s_map, x_s_ref).sum().item())
+            totals[target]["defect"] += float((mse_per_sample(direct, composed) / denominator).sum().item())
+
+        total_count += cur_batch
+
+    return {
+        target: {
+            "match_mse": values["match_mse"] / max(total_count, 1),
+            "defect": values["defect"] / max(total_count, 1),
+        }
+        for target, values in totals.items()
     }
 
 

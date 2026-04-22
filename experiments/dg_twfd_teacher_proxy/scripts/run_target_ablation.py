@@ -24,6 +24,10 @@ def main() -> None:
     parser.add_argument("--targets", default=None, help="Optional comma-separated target subset.")
     parser.add_argument("--num-samples", type=int, default=None, help="Override FID/sample count.")
     parser.add_argument("--eval-num-triplets", type=int, default=None, help="Override match/defect triplet count.")
+    parser.add_argument("--batch", type=int, default=None, help="Override generation batch size.")
+    parser.add_argument("--eval-batch", type=int, default=None, help="Override match/defect batch size.")
+    parser.add_argument("--fid-batch", type=int, default=None, help="Override FID batch size.")
+    parser.add_argument("--fp32", action="store_true", help="Disable FP16 network execution.")
     parser.add_argument("--skip-fid", action="store_true", help="Generate samples and metrics without FID.")
     parser.add_argument("--skip-generate", action="store_true", help="Skip sample generation and reuse existing images.")
     parser.add_argument("--skip-metrics", action="store_true", help="Skip match_mse and defect.")
@@ -34,7 +38,7 @@ def main() -> None:
     from utils.edm_proxy import (
         TARGETS,
         edm_root_from_file,
-        evaluate_match_and_defect,
+        evaluate_targets_match_and_defect,
         generate_target_samples,
         load_edm_network,
         resolve_path,
@@ -50,6 +54,12 @@ def main() -> None:
         cfg["num_samples"] = int(args.num_samples)
     if args.eval_num_triplets is not None:
         cfg["eval_num_triplets"] = int(args.eval_num_triplets)
+    if args.batch is not None:
+        cfg["batch"] = int(args.batch)
+    if args.eval_batch is not None:
+        cfg["eval_batch"] = int(args.eval_batch)
+    if args.fid_batch is not None:
+        cfg["fid_batch"] = int(args.fid_batch)
 
     requested_targets = cfg.get("targets", list(TARGETS))
     if args.targets:
@@ -70,7 +80,8 @@ def main() -> None:
     device = torch.device(args.device)
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but is not available")
-    net = load_edm_network(cfg["checkpoint"], device=device)
+    use_fp16 = bool(cfg.get("use_fp16", False)) and not args.fp32
+    net = load_edm_network(cfg["checkpoint"], device=device, use_fp16=use_fp16)
     approx_cfg = cfg["approximation"]
 
     metrics = {
@@ -82,8 +93,30 @@ def main() -> None:
         "seed": int(cfg["seed"]),
         "generation_steps": int(cfg["generation_steps"]),
         "approximation": approx_cfg,
+        "batch": int(cfg["batch"]),
+        "eval_batch": int(cfg["eval_batch"]),
+        "fid_batch": int(cfg["fid_batch"]),
+        "use_fp16": use_fp16,
         "targets": {},
     }
+
+    shared_metric_values = {}
+    if not args.skip_metrics:
+        shared_metric_values = evaluate_targets_match_and_defect(
+            net,
+            targets=list(requested_targets),
+            num_triplets=int(cfg["eval_num_triplets"]),
+            seed=int(cfg["seed"]),
+            batch_size=int(cfg["eval_batch"]),
+            transition_grid_steps=int(cfg["transition_grid_steps"]),
+            sigma_min=float(cfg["sigma_min"]),
+            sigma_max=float(cfg["sigma_max"]),
+            rho=float(cfg["rho"]),
+            approx_cfg=approx_cfg,
+            class_idx=cfg.get("class_idx"),
+            defect_eps=float(cfg["defect_eps"]),
+            device=device,
+        )
 
     for target in requested_targets:
         print(f"\n=== DG_TWFD target ablation: {target} ===")
@@ -116,22 +149,7 @@ def main() -> None:
             )
 
         if not args.skip_metrics:
-            metric_values = evaluate_match_and_defect(
-                net,
-                target=target,
-                num_triplets=int(cfg["eval_num_triplets"]),
-                seed=int(cfg["seed"]),
-                batch_size=int(cfg["eval_batch"]),
-                transition_grid_steps=int(cfg["transition_grid_steps"]),
-                sigma_min=float(cfg["sigma_min"]),
-                sigma_max=float(cfg["sigma_max"]),
-                rho=float(cfg["rho"]),
-                approx_cfg=approx_cfg,
-                class_idx=cfg.get("class_idx"),
-                defect_eps=float(cfg["defect_eps"]),
-                device=device,
-            )
-            target_metrics.update(metric_values)
+            target_metrics.update(shared_metric_values[target])
 
         if not args.skip_fid:
             fid = run_fid(
