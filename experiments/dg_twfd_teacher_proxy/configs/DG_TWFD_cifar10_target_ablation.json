@@ -1,0 +1,29 @@
+{
+  "experiment_name": "DG_TWFD_cifar10_target_ablation",
+  "dataset": "CIFAR-10",
+  "checkpoint": "https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-cond-vp.pkl",
+  "fid_ref": "https://nvlabs-fi-cdn.nvidia.com/edm/fid-refs/cifar10-32x32.npz",
+  "sampler_name": "DG_TWFD_EDM_online_heun",
+  "targets": ["velocity", "residual", "endpoint"],
+  "outdir": "experiments/dg_twfd_teacher_proxy/outputs/DG_TWFD_cifar10_target_ablation",
+  "num_samples": 1024,
+  "eval_num_triplets": 1024,
+  "seed": 42,
+  "generation_steps": 4,
+  "transition_grid_steps": 18,
+  "batch": 64,
+  "eval_batch": 32,
+  "fid_batch": 64,
+  "class_idx": null,
+  "subdirs": true,
+  "sigma_min": 0.002,
+  "sigma_max": 80.0,
+  "rho": 7.0,
+  "defect_eps": 1.0e-8,
+  "approximation": {
+    "name": "DG_TWFD_blockavg_quantized_target",
+    "block_size": 4,
+    "quant_bits": 8,
+    "clip": 2.0
+  }
+}
