@@ -1,24 +1,25 @@
 # DG-TWFD Time-Warp Analysis on EDM
 
-This experiment analyzes how time parameterization changes the distribution of
-local composition defect along pretrained EDM trajectories. It does not train a
-student model. The goal is to produce teacher-side evidence for the DG-TWFD
-claim that high-defect time regions should receive more sampling resolution.
+This experiment is a teacher-side analysis on pretrained EDM trajectories. It
+does not train a student model. It is designed to produce two paper-facing
+results:
 
-## Time Parameterizations
+1. A trajectory heatmap showing that time reparameterization redistributes
+   sampling points toward high-defect regions and makes interval defect more
+   uniform.
+2. A FID sweep comparing final sample quality under two schedules at
+   `16/32/48/64` steps.
 
-The scripts support:
+## What The Two Schedules Mean
 
-- `identity`: pure linearly spaced sigma steps from `sigma_max` to `sigma_min`,
-  followed by the final jump to zero. This intentionally does not use EDM's
-  `rho` schedule.
-- `dg_twfd_warp`: starts from EDM's original `rho` schedule. If warp weights are
-  provided, it applies a monotone warp over that rho schedule. In the one-click
-  comparison script, the warp is derived from the identity defect profile: high
-  defect intervals get larger CDF mass and therefore more sampling resolution.
+- `identity`: pure linear sigma spacing from `sigma_max` to `sigma_min`, plus
+  the final jump to `0`. This intentionally does not use EDM's `rho` schedule.
+- `dg_twfd_warp`: EDM's `rho=7` schedule by default. In the one-click defect
+  comparison, this schedule is further warped by weights derived from the
+  identity defect profile, so high-defect intervals receive more resolution.
 
-The interface is implemented in `utils/timewarp_core.py` through
-`TimeParameterization`:
+The implementation lives in `utils/timewarp_core.py`. The `TimeParameterization`
+interface exposes:
 
 ```text
 forward(sigma_original) -> tau
@@ -27,14 +28,13 @@ sample_steps(num_steps)
 map_schedule(original_t_steps)
 ```
 
-`dg_twfd_warp` is intentionally simple and non-trained. Without explicit weights
-it is the EDM rho schedule; with weights it becomes a configurable monotone
-proxy for the learned time redistribution used by DG-TWFD. The default analysis
-uses `num_steps=64`, so the interval-wise defect profile contains 64 bins.
+The default config uses `num_steps=64`, so the defect analysis produces exactly
+64 interval bins.
 
-## Defect
+## Defect Definition
 
-For three trajectory times `t_i > t_j > t_k`, the interval-wise proxy defect is:
+For each adjacent interval `[t_i, t_{i+1}]`, the analysis sets the midpoint
+`t_j = (t_i + t_{i+1}) / 2` and computes:
 
 ```text
 defect(i,j,k) =
@@ -42,22 +42,30 @@ defect(i,j,k) =
   / (eps + || Phi(t_i -> t_k, x_i) - x_i ||_mse^2)
 ```
 
-`Phi` is EDM online deterministic Heun rollout using the pretrained checkpoint.
-The default profile evaluates each adjacent interval `[t_i, t_{i+1}]` by using
-the midpoint `t_j = (t_i + t_{i+1}) / 2`, assigning one value to each interval
-bin. The summary reports `std / mean` as
-`defect_uniformity_ratio`; lower values mean the defect profile is more uniform.
+Here `Phi` is an online deterministic EDM Heun rollout using the pretrained
+checkpoint. The summary metric is:
 
-## 2D Trajectory Visualization
+```text
+defect_uniformity_ratio = std(defect_bins) / mean(defect_bins)
+```
 
-The visualization flattens saved trajectory states, runs PCA to two dimensions,
-and plots the trajectory curve. Edges are colored by local defect heat, while
-points are colored by trajectory index. This gives a compact view of where the
-ODE path is locally less reusable.
+Lower is more uniform.
+
+## Visualization
+
+The trajectory figure flattens saved states and projects them to 2D with PCA.
+The path is colored by local defect heat. A few time-point indices are labeled
+on the curve, with only sparse labels to avoid overlap.
+
+The intended visual story is:
+
+- `identity`: linear sigma points allocate steps poorly; defect heat is uneven.
+- `dg_twfd_warp`: rho schedule plus defect-derived warp places more points near
+  difficult intervals; defect heat should look more balanced.
 
 ## Setup
 
-Run from the EDM repository root:
+Run from the EDM root:
 
 ```bash
 cd /data2/yl7622/Zhengwei/DG-TWFD/refs/edm
@@ -65,71 +73,111 @@ conda activate dg
 export PYTHONPATH="$PWD:${PYTHONPATH:-}"
 ```
 
-The first run needs access to the public EDM checkpoint:
-
-```text
-https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-cond-vp.pkl
-```
-
-Plotting requires `matplotlib`. If needed:
+The first run downloads the public CIFAR-10 EDM checkpoint and FID reference.
+Plotting requires `matplotlib`:
 
 ```bash
 python -m pip install matplotlib
 ```
 
-## Commands
+## Command 1: Generate Identity Trajectory
 
-### 1. Identity Sampling And Analysis
+Purpose: save a trajectory under pure linear sigma spacing. This is the control
+showing how defect is distributed before EDM/DG-TWFD time allocation.
 
 ```bash
 python experiments/dg_twfd_timewarp_analysis/scripts/run_timewarp_sampling.py \
   --config experiments/dg_twfd_timewarp_analysis/configs/DG_TWFD_cifar10_timewarp_analysis.json \
   --time-param identity
+```
 
+Outputs:
+
+```text
+outputs/DG_TWFD_cifar10_timewarp_analysis/identity/trajectory.pt
+outputs/DG_TWFD_cifar10_timewarp_analysis/identity/schedule.csv
+```
+
+## Command 2: Compute Identity Defect
+
+Purpose: compute the 64-bin interval defect profile on the identity trajectory.
+This file is also used to derive DG-TWFD warp weights.
+
+```bash
 python experiments/dg_twfd_timewarp_analysis/scripts/compute_defect_profile.py \
   --config experiments/dg_twfd_timewarp_analysis/configs/DG_TWFD_cifar10_timewarp_analysis.json \
   --trajectory experiments/dg_twfd_timewarp_analysis/outputs/DG_TWFD_cifar10_timewarp_analysis/identity/trajectory.pt
-
-python experiments/dg_twfd_timewarp_analysis/scripts/plot_trajectory_2d.py \
-  --trajectory experiments/dg_twfd_timewarp_analysis/outputs/DG_TWFD_cifar10_timewarp_analysis/identity/trajectory.pt \
-  --defect-csv experiments/dg_twfd_timewarp_analysis/results/defect_identity.csv
 ```
 
-### 2. DG-TWFD Warp Sampling And Analysis
+Output:
 
-Standalone warped sampling uses the configurable monotone default warp:
+```text
+results/defect_identity.csv
+results/defect_identity_summary.json
+```
+
+## Command 3: Generate Warped Trajectory
+
+Purpose: save a trajectory under the DG-TWFD schedule. Standalone mode uses the
+configurable monotone/rho schedule. For the full defect-derived warp, prefer the
+one-click comparison command below.
 
 ```bash
 python experiments/dg_twfd_timewarp_analysis/scripts/run_timewarp_sampling.py \
   --config experiments/dg_twfd_timewarp_analysis/configs/DG_TWFD_cifar10_timewarp_analysis.json \
   --time-param dg_twfd_warp
-
-python experiments/dg_twfd_timewarp_analysis/scripts/compute_defect_profile.py \
-  --config experiments/dg_twfd_timewarp_analysis/configs/DG_TWFD_cifar10_timewarp_analysis.json \
-  --trajectory experiments/dg_twfd_timewarp_analysis/outputs/DG_TWFD_cifar10_timewarp_analysis/dg_twfd_warp/trajectory.pt
-
-python experiments/dg_twfd_timewarp_analysis/scripts/plot_trajectory_2d.py \
-  --trajectory experiments/dg_twfd_timewarp_analysis/outputs/DG_TWFD_cifar10_timewarp_analysis/dg_twfd_warp/trajectory.pt \
-  --defect-csv experiments/dg_twfd_timewarp_analysis/results/defect_dg_twfd_warp.csv
 ```
 
-### 3. One-Click Identity Vs Warp Comparison
+Outputs:
 
-This is the recommended command. It samples identity trajectories, computes the
-identity defect profile, derives a DG-TWFD style warp from that profile, then
-resamples and summarizes both settings.
+```text
+outputs/DG_TWFD_cifar10_timewarp_analysis/dg_twfd_warp/trajectory.pt
+outputs/DG_TWFD_cifar10_timewarp_analysis/dg_twfd_warp/schedule.csv
+```
+
+## Command 4: One-Click Defect And Heatmap Comparison
+
+Purpose: this is the main command for the first paper-facing result. It runs
+identity, computes identity defect, derives DG-TWFD warp weights, runs the
+warped trajectory, computes warped defect, and writes all figures/tables.
 
 ```bash
 python experiments/dg_twfd_timewarp_analysis/scripts/compare_identity_vs_warp.py \
   --config experiments/dg_twfd_timewarp_analysis/configs/DG_TWFD_cifar10_timewarp_analysis.json
 ```
 
-### 4. FID Sweep For Different Schedules
+Smoke run:
 
-To compare sample quality under the two time parameterizations at
-`16/32/48/64` steps. In this table, `identity` means linear sigma spacing, and
-`dg_twfd_warp` means EDM rho spacing unless you explicitly change the config
-warp weights:
+```bash
+python experiments/dg_twfd_timewarp_analysis/scripts/compare_identity_vs_warp.py \
+  --config experiments/dg_twfd_timewarp_analysis/configs/DG_TWFD_cifar10_timewarp_analysis.json \
+  --num-steps 16 \
+  --num-trajectories 4 \
+  --batch 4 \
+  --defect-batch 4
+```
+
+Paper-facing outputs:
+
+```text
+figures/trajectory_identity.png
+figures/trajectory_dg_twfd_warp.png
+figures/defect_profile_identity.png
+figures/defect_profile_dg_twfd_warp.png
+figures/defect_profile_comparison.png
+results/defect_identity.csv
+results/defect_dg_twfd_warp.csv
+results/defect_summary.csv
+results/summary.md
+```
+
+Use this set to argue: after time parameterization, defect is more uniform and
+sampling points are allocated more reasonably along the trajectory.
+
+## Command 5: FID Sweep For Final Samples
+
+Purpose: this is the second paper-facing result. It compares final sample
+quality under the two schedule families at `16/32/48/64` steps.
 
 ```bash
 python experiments/dg_twfd_timewarp_analysis/scripts/run_timewarp_fid_sweep.py \
@@ -141,55 +189,42 @@ python experiments/dg_twfd_timewarp_analysis/scripts/run_timewarp_fid_sweep.py \
   --fid-batch 512
 ```
 
-For paper-scale FID, increase `--num-samples` to `50000`. The script writes one
-sample folder and one schedule CSV per `(time_param, steps)` setting. It runs
-FP32 by default; use `--fp16` only for explicit precision sensitivity checks.
-
-For a faster smoke run:
+For paper-scale FID:
 
 ```bash
-python experiments/dg_twfd_timewarp_analysis/scripts/compare_identity_vs_warp.py \
+python experiments/dg_twfd_timewarp_analysis/scripts/run_timewarp_fid_sweep.py \
   --config experiments/dg_twfd_timewarp_analysis/configs/DG_TWFD_cifar10_timewarp_analysis.json \
-  --num-steps 8 \
-  --num-trajectories 4 \
-  --batch 4 \
-  --defect-batch 4
+  --time-params identity,dg_twfd_warp \
+  --steps 16,32,48,64 \
+  --num-samples 50000 \
+  --batch 512 \
+  --fid-batch 512
 ```
 
-## Outputs
-
-Figures:
+Outputs:
 
 ```text
-experiments/dg_twfd_timewarp_analysis/figures/trajectory_identity.png
-experiments/dg_twfd_timewarp_analysis/figures/trajectory_dg_twfd_warp.png
-experiments/dg_twfd_timewarp_analysis/figures/defect_profile_identity.png
-experiments/dg_twfd_timewarp_analysis/figures/defect_profile_dg_twfd_warp.png
-experiments/dg_twfd_timewarp_analysis/figures/defect_profile_comparison.png
+results/fid_schedule_comparison.csv
+results/fid_schedule_comparison.md
+outputs/DG_TWFD_cifar10_timewarp_analysis/fid_sweep/samples/
+outputs/DG_TWFD_cifar10_timewarp_analysis/fid_sweep/schedules/
+outputs/DG_TWFD_cifar10_timewarp_analysis/fid_sweep/logs/
 ```
 
-Tables and summaries:
+In this FID table, `identity` means linear sigma spacing and `dg_twfd_warp`
+means EDM rho spacing unless you explicitly pass custom warp weights in code.
+
+## Expected Paper Use
+
+Use `results/summary.md` and `results/defect_summary.csv` for the mechanism
+claim:
 
 ```text
-experiments/dg_twfd_timewarp_analysis/results/defect_identity.csv
-experiments/dg_twfd_timewarp_analysis/results/defect_dg_twfd_warp.csv
-experiments/dg_twfd_timewarp_analysis/results/defect_summary.csv
-experiments/dg_twfd_timewarp_analysis/results/summary.md
-experiments/dg_twfd_timewarp_analysis/results/fid_schedule_comparison.csv
-experiments/dg_twfd_timewarp_analysis/results/fid_schedule_comparison.md
+time parameterization -> more uniform defect -> more reasonable sampling ratio
 ```
 
-Raw trajectories and schedules:
+Use `results/fid_schedule_comparison.csv` for the sample-quality comparison:
 
 ```text
-experiments/dg_twfd_timewarp_analysis/outputs/DG_TWFD_cifar10_timewarp_analysis/
-experiments/dg_twfd_timewarp_analysis/outputs/DG_TWFD_cifar10_timewarp_analysis/fid_sweep/
+identity vs dg_twfd_warp at 16/32/48/64 steps
 ```
-
-The paper-facing number is `defect_uniformity_ratio = std / mean` from
-`defect_summary.csv`. The intended qualitative result is:
-
-- `identity`: linear sigma spacing exposes uneven local defect across 64 bins.
-- `dg_twfd_warp`: the EDM rho schedule, optionally followed by DG-TWFD style
-  defect-derived warp weights, expands high-defect regions and should make the
-  interval profile flatter.

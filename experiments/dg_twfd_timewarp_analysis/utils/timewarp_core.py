@@ -642,8 +642,6 @@ def derive_warp_weights_from_defect(rows: list[dict], *, floor: float = 0.05, po
     if values.max() > 0:
         values = values / values.max()
     weights = float(floor) + np.power(values + 1.0e-8, float(power))
-    if len(weights) > 0:
-        weights = np.concatenate([weights, weights[-1:]])
     return np.maximum(weights, 1.0e-8).tolist()
 
 
@@ -706,6 +704,20 @@ def plot_trajectory_2d(
     ax.scatter(coords[:, 0], coords[:, 1], color="white", edgecolor="black", linewidth=0.25, s=10, zorder=3)
     ax.annotate("start", xy=coords[0], xytext=(5, 5), textcoords="offset points", fontsize=7)
     ax.annotate("end", xy=coords[-1], xytext=(5, -10), textcoords="offset points", fontsize=7)
+    label_indices = np.unique(np.linspace(0, len(coords) - 1, num=min(8, len(coords)), dtype=np.int64))
+    for label_index in label_indices:
+        if label_index in {0, len(coords) - 1}:
+            continue
+        offset_y = 7 if int(label_index) % 2 == 0 else -10
+        ax.annotate(
+            str(int(label_index)),
+            xy=coords[label_index],
+            xytext=(5, offset_y),
+            textcoords="offset points",
+            fontsize=6,
+            color="black",
+            bbox={"boxstyle": "round,pad=0.12", "fc": "white", "ec": "none", "alpha": 0.65},
+        )
     ax.autoscale()
     ax.set_xlabel("PC1")
     ax.set_ylabel("PC2")
