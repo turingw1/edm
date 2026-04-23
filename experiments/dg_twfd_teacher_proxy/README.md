@@ -199,6 +199,11 @@ and rows are shared seeds. The `1`-step case uses the same EDM sampler equation
 with a single Euler jump from `sigma_max` to zero; this avoids the division by
 `num_steps - 1` limitation in the original `generate.py` CLI.
 
+The sweep runs the network in FP32 by default to match the official
+`generate.py` behavior. Do not enable `--fp16` for the low-step baseline unless
+you are explicitly testing precision sensitivity; forced FP16 can produce
+non-finite low-step samples that save as black PNGs.
+
 If a run stops during FID because the server had a transient distributed-port
 conflict, rerun the same command with `--skip-generate` to reuse the completed
 sample folders. The FID helper assigns a fresh local `MASTER_PORT` for each

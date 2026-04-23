@@ -257,7 +257,8 @@ def main() -> None:
     parser.add_argument("--grid-rows", type=int, default=8, help="Number of grid rows when --grid-seeds is omitted.")
     parser.add_argument("--grid-cell-size", type=int, default=128, help="Rendered grid cell size in pixels.")
     parser.add_argument("--device", default="cuda", help="Torch device. Use cuda on the server.")
-    parser.add_argument("--fp32", action="store_true", help="Disable FP16 network execution.")
+    parser.add_argument("--fp16", action="store_true", help="Enable FP16 network execution. Default is FP32 to match EDM generate.py.")
+    parser.add_argument("--fp32", action="store_true", help="Deprecated compatibility flag; FP32 is already the default.")
     parser.add_argument("--skip-generate", action="store_true", help="Reuse existing samples.")
     parser.add_argument("--skip-fid", action="store_true", help="Generate samples and grid without calculating FID.")
     args = parser.parse_args()
@@ -301,7 +302,7 @@ def main() -> None:
     device = torch.device(args.device)
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but is not available")
-    use_fp16 = bool(cfg.get("use_fp16", False)) and not args.fp32
+    use_fp16 = bool(args.fp16) and not args.fp32
     net = load_edm_network(cfg["checkpoint"], device=device, use_fp16=use_fp16)
 
     seeds = list(range(seed, seed + num_samples))
