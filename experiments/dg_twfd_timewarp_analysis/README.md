@@ -118,6 +118,25 @@ python experiments/dg_twfd_timewarp_analysis/scripts/compare_identity_vs_warp.py
   --config experiments/dg_twfd_timewarp_analysis/configs/DG_TWFD_cifar10_timewarp_analysis.json
 ```
 
+### 4. FID Sweep For Different Schedules
+
+To compare sample quality under the two time parameterizations at
+`16/32/48/64` steps:
+
+```bash
+python experiments/dg_twfd_timewarp_analysis/scripts/run_timewarp_fid_sweep.py \
+  --config experiments/dg_twfd_timewarp_analysis/configs/DG_TWFD_cifar10_timewarp_analysis.json \
+  --time-params identity,dg_twfd_warp \
+  --steps 16,32,48,64 \
+  --num-samples 5000 \
+  --batch 512 \
+  --fid-batch 512
+```
+
+For paper-scale FID, increase `--num-samples` to `50000`. The script writes one
+sample folder and one schedule CSV per `(time_param, steps)` setting. It runs
+FP32 by default; use `--fp16` only for explicit precision sensitivity checks.
+
 For a faster smoke run:
 
 ```bash
@@ -148,12 +167,15 @@ experiments/dg_twfd_timewarp_analysis/results/defect_identity.csv
 experiments/dg_twfd_timewarp_analysis/results/defect_dg_twfd_warp.csv
 experiments/dg_twfd_timewarp_analysis/results/defect_summary.csv
 experiments/dg_twfd_timewarp_analysis/results/summary.md
+experiments/dg_twfd_timewarp_analysis/results/fid_schedule_comparison.csv
+experiments/dg_twfd_timewarp_analysis/results/fid_schedule_comparison.md
 ```
 
 Raw trajectories and schedules:
 
 ```text
 experiments/dg_twfd_timewarp_analysis/outputs/DG_TWFD_cifar10_timewarp_analysis/
+experiments/dg_twfd_timewarp_analysis/outputs/DG_TWFD_cifar10_timewarp_analysis/fid_sweep/
 ```
 
 The paper-facing number is `defect_uniformity_ratio = std / mean` from

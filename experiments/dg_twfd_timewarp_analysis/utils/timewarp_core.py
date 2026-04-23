@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import pickle
+import re
+import socket
+import subprocess
+import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -264,6 +270,156 @@ def sample_trajectories(
             all_labels.append(class_labels.detach().cpu().to(torch.float32))
     labels = torch.cat(all_labels, dim=0) if all_labels else None
     return torch.cat(all_states, dim=0), labels
+
+
+def save_image_batch(images: torch.Tensor, *, batch_seeds: list[int], outdir: Path, subdirs: bool) -> None:
+    import PIL.Image
+
+    images_np = (images * 127.5 + 128).clip(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
+    for seed, image_np in zip(batch_seeds, images_np):
+        image_dir = outdir / f"{seed - seed % 1000:06d}" if subdirs else outdir
+        image_dir.mkdir(parents=True, exist_ok=True)
+        image_path = image_dir / f"{seed:06d}.png"
+        if image_np.shape[2] == 1:
+            PIL.Image.fromarray(image_np[:, :, 0], "L").save(image_path)
+        else:
+            PIL.Image.fromarray(image_np, "RGB").save(image_path)
+
+
+@torch.no_grad()
+def generate_final_samples(
+    net,
+    *,
+    sigmas: torch.Tensor,
+    outdir: Path,
+    seeds: list[int],
+    batch_size: int,
+    class_idx: int | None,
+    subdirs: bool,
+    device: torch.device,
+) -> None:
+    outdir.mkdir(parents=True, exist_ok=True)
+    for start in range(0, len(seeds), batch_size):
+        batch_seeds = seeds[start : start + batch_size]
+        rnd = StackedRandomGenerator(device, batch_seeds)
+        latents = rnd.randn([len(batch_seeds), net.img_channels, net.img_resolution, net.img_resolution], device=device)
+        class_labels = make_class_labels(net, rnd, len(batch_seeds), device, class_idx)
+        x = latents * sigmas[0].to(latents.dtype)
+        for t_cur, t_next in zip(sigmas[:-1], sigmas[1:]):
+            x = local_heun_transition(net, x, t_cur, t_next, class_labels)
+        save_image_batch(x, batch_seeds=batch_seeds, outdir=outdir, subdirs=subdirs)
+
+
+def find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def run_command(command: list[str], *, cwd: Path, log_path: Path, env_overrides: dict[str, str] | None = None) -> list[str]:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    printable = " ".join(command)
+    lines: list[str] = []
+    with log_path.open("w", encoding="utf-8") as log_file:
+        log_file.write(printable + "\n\n")
+        env = os.environ.copy()
+        if env_overrides:
+            env.update(env_overrides)
+            log_file.write("Environment overrides:\n")
+            for key in sorted(env_overrides):
+                log_file.write(f"{key}={env_overrides[key]}\n")
+            log_file.write("\n")
+        process = subprocess.Popen(
+            command,
+            cwd=str(cwd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=env,
+        )
+        assert process.stdout is not None
+        for line in process.stdout:
+            print(line, end="")
+            log_file.write(line)
+            lines.append(line.rstrip("\n"))
+        returncode = process.wait()
+        if returncode != 0:
+            raise subprocess.CalledProcessError(returncode, command)
+    return lines
+
+
+def parse_fid(lines: list[str]) -> float | None:
+    for line in reversed(lines):
+        text = line.strip()
+        if re.fullmatch(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?", text):
+            return float(text)
+    return None
+
+
+def run_fid(
+    *,
+    edm_root: Path,
+    images: Path,
+    ref: str,
+    num_samples: int,
+    batch_size: int,
+    log_path: Path,
+) -> float | None:
+    command = [
+        sys.executable,
+        "fid.py",
+        "calc",
+        f"--images={images}",
+        f"--ref={ref}",
+        f"--num={num_samples}",
+        f"--batch={batch_size}",
+    ]
+    env_overrides = {
+        "MASTER_ADDR": "127.0.0.1",
+        "MASTER_PORT": str(find_free_port()),
+        "RANK": "0",
+        "LOCAL_RANK": "0",
+        "WORLD_SIZE": "1",
+    }
+    return parse_fid(run_command(command, cwd=edm_root, log_path=log_path, env_overrides=env_overrides))
+
+
+def write_fid_sweep_tables(*, rows: list[dict], md_path: Path, csv_path: Path) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "time_param",
+        "num_steps",
+        "fid",
+        "num_samples",
+        "seed",
+        "sample_dir",
+        "schedule_csv",
+        "elapsed_sec",
+    ]
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in fieldnames})
+
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["time_param"]), []).append(row)
+    with md_path.open("w", encoding="utf-8") as f:
+        f.write("# EDM Time-Parameterization FID Sweep\n\n")
+        f.write("| time_param | steps | FID↓ | num samples | elapsed sec |\n")
+        f.write("|---|---:|---:|---:|---:|\n")
+        for time_param in sorted(grouped):
+            for row in sorted(grouped[time_param], key=lambda item: int(item["num_steps"])):
+                fid = "" if row.get("fid") is None else f"{float(row['fid']):.6g}"
+                elapsed = "" if row.get("elapsed_sec") is None else f"{float(row['elapsed_sec']):.6g}"
+                f.write(
+                    f"| {time_param} | {row['num_steps']} | {fid} | "
+                    f"{row['num_samples']} | {elapsed} |\n"
+                )
+        f.write("\nSource samples and schedules are listed in the CSV file.\n")
 
 
 def save_schedule_csv(path: str | Path, *, sigmas: np.ndarray, param: TimeParameterization) -> None:
