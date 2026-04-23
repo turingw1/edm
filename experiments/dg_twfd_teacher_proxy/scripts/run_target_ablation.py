@@ -101,6 +101,7 @@ def main() -> None:
         "eval_batch": int(cfg["eval_batch"]),
         "fid_batch": int(cfg["fid_batch"]),
         "use_fp16": use_fp16,
+        "metric_nonfinite_penalty": float(cfg.get("metric_nonfinite_penalty", 1.0e6)),
         "targets": {},
     }
 
@@ -162,17 +163,20 @@ def main() -> None:
             approx_cfg=approx_cfg,
             class_idx=cfg.get("class_idx"),
             defect_eps=float(cfg["defect_eps"]),
+            nonfinite_penalty=float(cfg.get("metric_nonfinite_penalty", 1.0e6)),
             device=device,
         )
 
     for target in requested_targets:
         print(f"\n=== DG_TWFD target ablation: {target} ===")
-        target_sample_dir = samples_dir / f"DG_TWFD_{target}_steps4"
+        generation_steps = int(cfg["generation_steps"])
+        target_sample_dir = samples_dir / f"DG_TWFD_{target}_steps{generation_steps}"
         target_metrics = {
             "target": target,
             "fid4": None,
             "defect": None,
             "match_mse": None,
+            "steps": generation_steps,
             "sample_dir": str(target_sample_dir),
         }
 
@@ -185,7 +189,7 @@ def main() -> None:
                 num_samples=int(cfg["num_samples"]),
                 seed=int(cfg["seed"]),
                 batch_size=int(cfg["batch"]),
-                num_steps=int(cfg["generation_steps"]),
+                num_steps=generation_steps,
                 sigma_min=float(cfg["sigma_min"]),
                 sigma_max=float(cfg["sigma_max"]),
                 rho=float(cfg["rho"]),
@@ -205,7 +209,7 @@ def main() -> None:
                 ref=cfg["fid_ref"],
                 num_samples=int(cfg["num_samples"]),
                 batch_size=int(cfg["fid_batch"]),
-                log_path=logs_dir / f"DG_TWFD_fid_{target}_steps4.log",
+                log_path=logs_dir / f"DG_TWFD_fid_{target}_steps{generation_steps}.log",
                 dry_run=args.dry_run,
             )
             target_metrics["fid4"] = fid

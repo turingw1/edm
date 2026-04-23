@@ -23,10 +23,13 @@
   "sigma_max": 80.0,
   "rho": 7.0,
   "defect_eps": 1.0e-8,
+  "metric_nonfinite_penalty": 1000000.0,
   "approximation": {
-    "name": "DG_TWFD_blockavg_quantized_target",
+    "name": "DG_TWFD_rms_quantized_target",
     "block_size": 1,
     "quant_bits": 8,
-    "clip": 8.0
+    "scale_mode": "per_sample_rms",
+    "clip_multiple": 6.0,
+    "scale_eps": 1.0e-6
   }
 }

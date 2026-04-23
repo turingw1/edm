@@ -145,7 +145,10 @@ def approximate_target(z: torch.Tensor, approx_cfg: dict) -> torch.Tensor:
 
     block_size = int(approx_cfg.get("block_size", 1))
     quant_bits = int(approx_cfg.get("quant_bits", 0))
-    clip = float(approx_cfg.get("clip", 0.0))
+    scale_mode = str(approx_cfg.get("scale_mode", "fixed"))
+    fixed_clip = float(approx_cfg.get("clip", 0.0))
+    clip_multiple = float(approx_cfg.get("clip_multiple", fixed_clip))
+    scale_eps = float(approx_cfg.get("scale_eps", 1.0e-6))
     y = z
     if block_size > 1:
         if y.shape[-1] % block_size != 0 or y.shape[-2] % block_size != 0:
@@ -153,11 +156,24 @@ def approximate_target(z: torch.Tensor, approx_cfg: dict) -> torch.Tensor:
         y = F.avg_pool2d(y, kernel_size=block_size, stride=block_size)
         y = F.interpolate(y, size=z.shape[-2:], mode="nearest")
     if quant_bits > 0:
-        if clip <= 0:
-            raise ValueError("approximation.clip must be positive when quant_bits > 0")
+        if scale_mode == "fixed":
+            if fixed_clip <= 0:
+                raise ValueError("approximation.clip must be positive when quant_bits > 0 and scale_mode='fixed'")
+            clip = fixed_clip
+        elif scale_mode == "per_sample_rms":
+            if clip_multiple <= 0:
+                raise ValueError("approximation.clip_multiple must be positive when scale_mode='per_sample_rms'")
+            reduce_dims = tuple(range(1, y.ndim))
+            scale = y.square().mean(dim=reduce_dims, keepdim=True).sqrt().clamp_min(scale_eps)
+            clip = clip_multiple
+            y = y / scale
+        else:
+            raise ValueError(f"Unsupported approximation.scale_mode: {scale_mode}")
         levels = float(2**quant_bits - 1)
         y = torch.clamp(y, -clip, clip)
         y = torch.round((y + clip) / (2.0 * clip) * levels) / levels * (2.0 * clip) - clip
+        if scale_mode == "per_sample_rms":
+            y = y * scale
     return y
 
 
@@ -207,6 +223,12 @@ def apply_induced_map(
 
 def mse_per_sample(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return (x - y).square().flatten(1).mean(dim=1)
+
+
+def finite_penalized_sum(values: torch.Tensor, *, penalty: float) -> tuple[float, int, int]:
+    finite = torch.isfinite(values)
+    safe = torch.where(finite, values, torch.full_like(values, float(penalty)))
+    return float(safe.sum().item()), int(finite.sum().item()), int(values.numel())
 
 
 @torch.no_grad()
@@ -317,6 +339,7 @@ def evaluate_match_and_defect(
     approx_cfg: dict,
     class_idx: int | None,
     defect_eps: float,
+    nonfinite_penalty: float,
     device: torch.device,
 ) -> dict[str, float]:
     t_grid = edm_sigma_schedule(
@@ -391,11 +414,13 @@ def evaluate_match_and_defect(
             approx_cfg=approx_cfg,
         )
         numerator = mse_per_sample(direct, composed)
-        denominator = float(defect_eps) + mse_per_sample(x_r_ref, x_t)
+        denominator = (float(defect_eps) + mse_per_sample(x_r_ref, x_t)).clamp_min(float(defect_eps))
         defect = numerator / denominator
 
-        total_match += float(match.sum().item())
-        total_defect += float(defect.sum().item())
+        match_sum, _, _ = finite_penalized_sum(match, penalty=nonfinite_penalty)
+        defect_sum, _, _ = finite_penalized_sum(defect, penalty=nonfinite_penalty)
+        total_match += match_sum
+        total_defect += defect_sum
         total_count += cur_batch
 
     return {
@@ -419,6 +444,7 @@ def evaluate_targets_match_and_defect(
     approx_cfg: dict,
     class_idx: int | None,
     defect_eps: float,
+    nonfinite_penalty: float,
     device: torch.device,
 ) -> dict[str, dict[str, float]]:
     """Evaluate all target spaces using one shared set of EDM reference rollouts."""
@@ -439,7 +465,16 @@ def evaluate_targets_match_and_defect(
     if num_grid < 4:
         raise ValueError("transition_grid_steps must produce at least 4 grid points")
 
-    totals = {target: {"match_mse": 0.0, "defect": 0.0} for target in targets}
+    totals = {
+        target: {
+            "match_mse": 0.0,
+            "defect": 0.0,
+            "match_finite": 0,
+            "defect_finite": 0,
+            "metric_count": 0,
+        }
+        for target in targets
+    }
     total_count = 0
     rng = torch.Generator(device).manual_seed(int(seed) + 919)
 
@@ -470,7 +505,7 @@ def evaluate_targets_match_and_defect(
 
         x_s_ref = reference_transition(net, x_t, t, s, class_labels)
         x_r_ref = reference_transition(net, x_t, t, r, class_labels)
-        denominator = float(defect_eps) + mse_per_sample(x_r_ref, x_t)
+        denominator = (float(defect_eps) + mse_per_sample(x_r_ref, x_t)).clamp_min(float(defect_eps))
 
         for target in targets:
             x_s_map = induced_transition_from_reference(
@@ -498,8 +533,15 @@ def evaluate_targets_match_and_defect(
                 s=r,
                 approx_cfg=approx_cfg,
             )
-            totals[target]["match_mse"] += float(mse_per_sample(x_s_map, x_s_ref).sum().item())
-            totals[target]["defect"] += float((mse_per_sample(direct, composed) / denominator).sum().item())
+            match = mse_per_sample(x_s_map, x_s_ref)
+            defect = mse_per_sample(direct, composed) / denominator
+            match_sum, match_finite, metric_count = finite_penalized_sum(match, penalty=nonfinite_penalty)
+            defect_sum, defect_finite, _ = finite_penalized_sum(defect, penalty=nonfinite_penalty)
+            totals[target]["match_mse"] += match_sum
+            totals[target]["defect"] += defect_sum
+            totals[target]["match_finite"] += match_finite
+            totals[target]["defect_finite"] += defect_finite
+            totals[target]["metric_count"] += metric_count
 
         total_count += cur_batch
 
@@ -507,6 +549,9 @@ def evaluate_targets_match_and_defect(
         target: {
             "match_mse": values["match_mse"] / max(total_count, 1),
             "defect": values["defect"] / max(total_count, 1),
+            "match_finite_fraction": values["match_finite"] / max(values["metric_count"], 1),
+            "defect_finite_fraction": values["defect_finite"] / max(values["metric_count"], 1),
+            "nonfinite_penalty": float(nonfinite_penalty),
         }
         for target, values in totals.items()
     }
