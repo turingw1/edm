@@ -199,6 +199,11 @@ and rows are shared seeds. The `1`-step case uses the same EDM sampler equation
 with a single Euler jump from `sigma_max` to zero; this avoids the division by
 `num_steps - 1` limitation in the original `generate.py` CLI.
 
+If a run stops during FID because the server had a transient distributed-port
+conflict, rerun the same command with `--skip-generate` to reuse the completed
+sample folders. The FID helper assigns a fresh local `MASTER_PORT` for each
+step.
+
 ## ImageNet64
 
 ImageNet64 is optional and uses the public conditional ADM EDM checkpoint:

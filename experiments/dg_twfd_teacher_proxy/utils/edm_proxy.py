@@ -4,6 +4,7 @@ import json
 import os
 import pickle
 import re
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -576,11 +577,31 @@ def run_fid(
         f"--num={num_samples}",
         f"--batch={batch_size}",
     ]
-    lines = run_command(command, cwd=edm_root, log_path=log_path, dry_run=dry_run)
+    env_overrides = {
+        "MASTER_ADDR": "127.0.0.1",
+        "MASTER_PORT": str(find_free_port()),
+        "RANK": "0",
+        "LOCAL_RANK": "0",
+        "WORLD_SIZE": "1",
+    }
+    lines = run_command(command, cwd=edm_root, log_path=log_path, dry_run=dry_run, env_overrides=env_overrides)
     return parse_fid(lines)
 
 
-def run_command(command: list[str], *, cwd: Path, log_path: Path, dry_run: bool) -> list[str]:
+def find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def run_command(
+    command: list[str],
+    *,
+    cwd: Path,
+    log_path: Path,
+    dry_run: bool,
+    env_overrides: dict[str, str] | None = None,
+) -> list[str]:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     printable = " ".join(command)
     if dry_run:
@@ -591,6 +612,13 @@ def run_command(command: list[str], *, cwd: Path, log_path: Path, dry_run: bool)
     lines: list[str] = []
     with log_path.open("w", encoding="utf-8") as log_file:
         log_file.write(printable + "\n\n")
+        env = os.environ.copy()
+        if env_overrides:
+            env.update(env_overrides)
+            log_file.write("Environment overrides:\n")
+            for key in sorted(env_overrides):
+                log_file.write(f"{key}={env_overrides[key]}\n")
+            log_file.write("\n")
         process = subprocess.Popen(
             command,
             cwd=str(cwd),
@@ -598,7 +626,7 @@ def run_command(command: list[str], *, cwd: Path, log_path: Path, dry_run: bool)
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
-            env=os.environ.copy(),
+            env=env,
         )
         assert process.stdout is not None
         for line in process.stdout:
