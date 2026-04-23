@@ -9,8 +9,11 @@ claim that high-defect time regions should receive more sampling resolution.
 
 The scripts support:
 
-- `identity`: the original EDM sigma schedule.
-- `dg_twfd_warp`: a monotone warp over the same sigma range. In the one-click
+- `identity`: pure linearly spaced sigma steps from `sigma_max` to `sigma_min`,
+  followed by the final jump to zero. This intentionally does not use EDM's
+  `rho` schedule.
+- `dg_twfd_warp`: starts from EDM's original `rho` schedule. If warp weights are
+  provided, it applies a monotone warp over that rho schedule. In the one-click
   comparison script, the warp is derived from the identity defect profile: high
   defect intervals get larger CDF mass and therefore more sampling resolution.
 
@@ -24,8 +27,10 @@ sample_steps(num_steps)
 map_schedule(original_t_steps)
 ```
 
-`dg_twfd_warp` is intentionally simple and non-trained. It is a configurable
-monotone proxy for the learned time redistribution used by DG-TWFD.
+`dg_twfd_warp` is intentionally simple and non-trained. Without explicit weights
+it is the EDM rho schedule; with weights it becomes a configurable monotone
+proxy for the learned time redistribution used by DG-TWFD. The default analysis
+uses `num_steps=64`, so the interval-wise defect profile contains 64 bins.
 
 ## Defect
 
@@ -38,8 +43,9 @@ defect(i,j,k) =
 ```
 
 `Phi` is EDM online deterministic Heun rollout using the pretrained checkpoint.
-The default profile uses adjacent triples `(i, i+1, i+2)`, assigning each value
-to an interval bin. The summary reports `std / mean` as
+The default profile evaluates each adjacent interval `[t_i, t_{i+1}]` by using
+the midpoint `t_j = (t_i + t_{i+1}) / 2`, assigning one value to each interval
+bin. The summary reports `std / mean` as
 `defect_uniformity_ratio`; lower values mean the defect profile is more uniform.
 
 ## 2D Trajectory Visualization
@@ -121,7 +127,9 @@ python experiments/dg_twfd_timewarp_analysis/scripts/compare_identity_vs_warp.py
 ### 4. FID Sweep For Different Schedules
 
 To compare sample quality under the two time parameterizations at
-`16/32/48/64` steps:
+`16/32/48/64` steps. In this table, `identity` means linear sigma spacing, and
+`dg_twfd_warp` means EDM rho spacing unless you explicitly change the config
+warp weights:
 
 ```bash
 python experiments/dg_twfd_timewarp_analysis/scripts/run_timewarp_fid_sweep.py \
@@ -181,6 +189,7 @@ experiments/dg_twfd_timewarp_analysis/outputs/DG_TWFD_cifar10_timewarp_analysis/
 The paper-facing number is `defect_uniformity_ratio = std / mean` from
 `defect_summary.csv`. The intended qualitative result is:
 
-- `identity`: defect is concentrated in fewer intervals.
-- `dg_twfd_warp`: high-defect regions are expanded, making the interval profile
-  flatter and the `std / mean` ratio smaller.
+- `identity`: linear sigma spacing exposes uneven local defect across 64 bins.
+- `dg_twfd_warp`: the EDM rho schedule, optionally followed by DG-TWFD style
+  defect-derived warp weights, expands high-defect regions and should make the
+  interval profile flatter.

@@ -120,6 +120,25 @@ def edm_sigma_schedule(
     return torch.cat([net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])])
 
 
+def linear_sigma_schedule(
+    net,
+    *,
+    num_steps: int,
+    sigma_min: float,
+    sigma_max: float,
+    device: torch.device,
+) -> torch.Tensor:
+    if num_steps < 1:
+        raise ValueError("num_steps must be at least 1")
+    sigma_min = max(float(sigma_min), float(net.sigma_min))
+    sigma_max = min(float(sigma_max), float(net.sigma_max))
+    if num_steps == 1:
+        t_steps = torch.as_tensor([sigma_max], dtype=torch.float64, device=device)
+    else:
+        t_steps = torch.linspace(sigma_max, sigma_min, steps=num_steps, dtype=torch.float64, device=device)
+    return torch.cat([net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])])
+
+
 def make_class_labels(net, rnd: StackedRandomGenerator, batch_size: int, device: torch.device, class_idx: int | None):
     if not getattr(net, "label_dim", 0):
         return None
@@ -220,14 +239,23 @@ def schedule_for_time_param(
     strength: float = 3.0,
     power: float = 1.5,
 ) -> tuple[torch.Tensor, TimeParameterization]:
-    base = edm_sigma_schedule(
-        net,
-        num_steps=num_steps,
-        sigma_min=sigma_min,
-        sigma_max=sigma_max,
-        rho=rho,
-        device=device,
-    )
+    if time_param == "identity":
+        base = linear_sigma_schedule(
+            net,
+            num_steps=num_steps,
+            sigma_min=sigma_min,
+            sigma_max=sigma_max,
+            device=device,
+        )
+    else:
+        base = edm_sigma_schedule(
+            net,
+            num_steps=num_steps,
+            sigma_min=sigma_min,
+            sigma_max=sigma_max,
+            rho=rho,
+            device=device,
+        )
     base_np = base.detach().cpu().numpy()
     param = build_time_parameterization(
         name=time_param,
@@ -236,7 +264,7 @@ def schedule_for_time_param(
         strength=strength,
         power=power,
     )
-    mapped = torch.as_tensor(param.sample_steps(num_steps), dtype=torch.float64, device=device)
+    mapped = base if time_param == "identity" else torch.as_tensor(param.sample_steps(num_steps), dtype=torch.float64, device=device)
     mapped = torch.clamp(mapped, min=0.0)
     mapped[0] = base[0]
     mapped[-1] = 0.0
@@ -480,19 +508,19 @@ def compute_defect_rows(
     if states.ndim != 5:
         raise ValueError("trajectory states must have shape [N, T, C, H, W]")
     num_samples, num_points = int(states.shape[0]), int(states.shape[1])
-    if num_points < 3:
-        raise ValueError("at least three trajectory points are required")
+    if num_points < 2:
+        raise ValueError("at least two trajectory points are required")
 
     tau = np.asarray(metadata.get("tau", np.linspace(0.0, 1.0, num_points)), dtype=np.float64)
     rows: list[dict] = []
     all_defects: list[float] = []
 
-    for interval_index in range(num_points - 2):
+    for interval_index in range(num_points - 1):
         per_interval: list[float] = []
         denom_values: list[float] = []
         t_i = sigmas[interval_index]
-        t_j = sigmas[interval_index + 1]
-        t_k = sigmas[interval_index + 2]
+        t_k = sigmas[interval_index + 1]
+        t_j = 0.5 * (t_i + t_k)
         for start in range(0, num_samples, batch_size):
             end = min(start + batch_size, num_samples)
             x_i = states[start:end, interval_index].to(device)
@@ -524,14 +552,14 @@ def compute_defect_rows(
                 "time_param": time_param,
                 "interval_index": interval_index,
                 "source_index": interval_index,
-                "mid_index": interval_index + 1,
-                "target_index": interval_index + 2,
+                "mid_index": -1,
+                "target_index": interval_index + 1,
                 "sigma_start": float(sigmas[interval_index].detach().cpu()),
-                "sigma_mid": float(sigmas[interval_index + 1].detach().cpu()),
-                "sigma_end": float(sigmas[interval_index + 2].detach().cpu()),
+                "sigma_mid": float(t_j.detach().cpu()),
+                "sigma_end": float(sigmas[interval_index + 1].detach().cpu()),
                 "tau_start": float(tau[interval_index]),
-                "tau_mid": float(tau[interval_index + 1]),
-                "tau_end": float(tau[interval_index + 2]),
+                "tau_mid": float(0.5 * (tau[interval_index] + tau[interval_index + 1])),
+                "tau_end": float(tau[interval_index + 1]),
                 "defect_mean": defect_mean,
                 "defect_std": defect_std,
                 "denominator_mean": denom_mean,
@@ -663,20 +691,27 @@ def plot_trajectory_2d(
     segment_values = np.asarray([defects[min(i, len(defects) - 1)] for i in range(len(coords) - 1)], dtype=np.float64)
     segments = np.stack([coords[:-1], coords[1:]], axis=1)
 
-    fig, ax = plt.subplots(figsize=(5.2, 4.2), dpi=160)
-    collection = LineCollection(segments, cmap="magma", linewidths=2.5)
+    fig, ax = plt.subplots(figsize=(4.4, 3.45), dpi=180, constrained_layout=True)
+    finite_values = segment_values[np.isfinite(segment_values)]
+    if finite_values.size:
+        vmin, vmax = np.percentile(finite_values, [5, 95])
+        if vmax <= vmin:
+            vmax = vmin + 1.0e-12
+    else:
+        vmin, vmax = 0.0, 1.0
+    collection = LineCollection(segments, cmap="inferno", linewidths=2.0)
     collection.set_array(segment_values)
+    collection.set_clim(vmin, vmax)
     ax.add_collection(collection)
-    scatter = ax.scatter(coords[:, 0], coords[:, 1], c=np.linspace(0.0, 1.0, len(coords)), cmap="viridis", s=20, zorder=3)
+    ax.scatter(coords[:, 0], coords[:, 1], color="white", edgecolor="black", linewidth=0.25, s=10, zorder=3)
+    ax.annotate("start", xy=coords[0], xytext=(5, 5), textcoords="offset points", fontsize=7)
+    ax.annotate("end", xy=coords[-1], xytext=(5, -10), textcoords="offset points", fontsize=7)
     ax.autoscale()
     ax.set_xlabel("PC1")
     ax.set_ylabel("PC2")
-    ax.set_title(title or f"{metadata.get('time_param', 'trajectory')} trajectory")
+    ax.set_title(title or f"{metadata.get('time_param', 'trajectory')} trajectory", fontsize=9)
     cbar = fig.colorbar(collection, ax=ax)
     cbar.set_label("local defect")
-    tbar = fig.colorbar(scatter, ax=ax, fraction=0.046, pad=0.08)
-    tbar.set_label("trajectory index")
-    fig.tight_layout()
     out_png = Path(out_png)
     out_png.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_png)
@@ -696,13 +731,15 @@ def plot_defect_profile(
     rows = read_defect_csv(defect_csv)
     x = np.asarray([int(row["interval_index"]) for row in rows], dtype=np.int64)
     y = np.asarray([float(row["defect_mean"]) for row in rows], dtype=np.float64)
-    fig, ax = plt.subplots(figsize=(5.2, 3.0), dpi=160)
-    ax.plot(x, y, marker="o", linewidth=1.6)
+    fig, ax = plt.subplots(figsize=(4.8, 2.8), dpi=180, constrained_layout=True)
+    ax.plot(x, y, marker="o", markersize=2.4, linewidth=1.25, color="#2f6fbb")
     ax.set_xlabel("interval index")
     ax.set_ylabel("normalized defect")
-    ax.set_title(title or "Defect profile")
+    ax.set_title(title or "Defect profile", fontsize=9)
+    if len(x) > 10:
+        tick_step = max(1, int(np.ceil(len(x) / 8)))
+        ax.set_xticks(x[::tick_step])
     ax.grid(True, alpha=0.25)
-    fig.tight_layout()
     out_png = Path(out_png)
     out_png.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_png)
@@ -722,17 +759,21 @@ def plot_defect_comparison(
 
     id_rows = read_defect_csv(identity_csv)
     warp_rows = read_defect_csv(warp_csv)
-    fig, ax = plt.subplots(figsize=(5.6, 3.2), dpi=160)
-    for label, rows in [("identity", id_rows), ("dg_twfd_warp", warp_rows)]:
+    fig, ax = plt.subplots(figsize=(5.0, 3.0), dpi=180, constrained_layout=True)
+    for label, rows, color in [("identity", id_rows, "#4c78a8"), ("dg_twfd_warp", warp_rows, "#f58518")]:
         x = np.asarray([int(row["interval_index"]) for row in rows], dtype=np.int64)
         y = np.asarray([float(row["defect_mean"]) for row in rows], dtype=np.float64)
-        ax.plot(x, y, marker="o", linewidth=1.6, label=label)
+        ax.plot(x, y, marker="o", markersize=2.4, linewidth=1.25, label=label, color=color)
     ax.set_xlabel("interval index")
     ax.set_ylabel("normalized defect")
-    ax.set_title("Defect profile comparison")
+    ax.set_title("Defect profile comparison", fontsize=9)
+    if id_rows:
+        id_x = np.asarray([int(row["interval_index"]) for row in id_rows], dtype=np.int64)
+        if len(id_x) > 10:
+            tick_step = max(1, int(np.ceil(len(id_x) / 8)))
+            ax.set_xticks(id_x[::tick_step])
     ax.grid(True, alpha=0.25)
-    ax.legend()
-    fig.tight_layout()
+    ax.legend(fontsize=8, frameon=False)
     out_png = Path(out_png)
     out_png.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_png)
