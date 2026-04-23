@@ -178,6 +178,27 @@ python experiments/dg_twfd_teacher_proxy/scripts/run_target_ablation.py \
   --eval-num-triplets 10000
 ```
 
+### Official EDM step sweep
+
+To check the unmodified EDM baseline across low step counts, run:
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/run_edm_baseline_sweep.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_cifar10_target_ablation.json \
+  --steps 1,2,4,8,16 \
+  --num-samples 5000 \
+  --grid-seeds 42-49 \
+  --batch 512 \
+  --fid-batch 512
+```
+
+`--steps` accepts comma lists and ranges. If omitted, it defaults to
+`1,2,4,8,16`. The script uses the EDM sampler configuration from the config,
+writes one FID row per step, and creates a grid where columns are step counts
+and rows are shared seeds. The `1`-step case uses the same EDM sampler equation
+with a single Euler jump from `sigma_max` to zero; this avoids the division by
+`num_steps - 1` limitation in the original `generate.py` CLI.
+
 ## ImageNet64
 
 ImageNet64 is optional and uses the public conditional ADM EDM checkpoint:
@@ -215,6 +236,14 @@ Raw samples, FID logs, and per-target metrics are under:
 
 ```text
 experiments/dg_twfd_teacher_proxy/outputs/DG_TWFD_<dataset>_target_ablation/
+```
+
+Official EDM sweep outputs are under:
+
+```text
+experiments/dg_twfd_teacher_proxy/outputs/DG_TWFD_<dataset>_edm_baseline_sweep/
+experiments/dg_twfd_teacher_proxy/results/edm_baseline_sweep_<dataset>.md
+experiments/dg_twfd_teacher_proxy/results/edm_baseline_sweep_<dataset>.csv
 ```
 
 The CSV fields are:
