@@ -362,7 +362,7 @@ Start from:
 
 ```text
 CIFAR-10 DG-TWFD progression:
-actual steps 8, 16, 24, 32
+actual steps 16, 32, 48, 64
 display labels 1, 2, 4, 8
 
 ImageNet64 DG-TWFD progression:
@@ -370,7 +370,7 @@ actual steps 32, 64, 128, 256
 display labels 1, 2, 4, 8
 
 CIFAR-10 identity vs DG-TWFD:
-actual steps 8, 16, 24, 32
+actual steps 16, 32, 48, 64
 display labels 1, 2, 4, 8
 
 ImageNet64 identity vs DG-TWFD:
@@ -378,7 +378,7 @@ actual steps 32, 64, 128, 256
 display labels 1, 2, 4, 8
 
 Fixed-step diversity:
-CIFAR-10 at actual 24 or 32 steps, with paper label 4 or 8 if needed
+CIFAR-10 at actual 48 or 64 steps, with paper label 4 or 8 if needed
 ```
 
 If the first visual pass shows weak contrast, update only the step list and keep
