@@ -31,6 +31,19 @@ def parse_int_list(text: str) -> list[int]:
     return values
 
 
+def parse_label_list(text: str | None, *, expected_len: int | None = None, fallback_ints: list[int] | None = None) -> list[str]:
+    if text is None or not str(text).strip():
+        if fallback_ints is not None:
+            labels = [str(int(value)) for value in fallback_ints]
+        else:
+            labels = []
+    else:
+        labels = [item.strip() for item in str(text).split(",") if item.strip()]
+    if expected_len is not None and len(labels) != int(expected_len):
+        raise ValueError(f"Expected {expected_len} display labels, got {len(labels)}")
+    return labels
+
+
 def write_json(path: str | Path, payload: dict[str, Any]) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -283,6 +296,7 @@ def build_progression_canvas(
     method: str,
     rows: list[dict[str, Any]],
     steps: list[int],
+    display_labels: list[str],
     sample_dirs: dict[int, Path],
     subdirs: bool,
     cell_size: int,
@@ -292,7 +306,7 @@ def build_progression_canvas(
 
     rows = ensure_rows(rows, dataset=dataset)
     label_w = 170 if dataset_key(dataset) == "imagenet64" else 120
-    header_h = 54
+    header_h = 34
     title_h = 34
     width = label_w + cell_size * len(steps)
     height = title_h + header_h + cell_size * len(rows)
@@ -300,10 +314,9 @@ def build_progression_canvas(
     draw = PIL.ImageDraw.Draw(canvas)
 
     draw.text((10, 8), f"{pretty_method_label(method)} | {dataset}", fill=(0, 0, 0))
-    for col, step in enumerate(steps):
+    for col, label in enumerate(display_labels):
         x = label_w + col * cell_size
-        draw.text((x + 8, title_h + 8), f"{step} st", fill=(0, 0, 0))
-        draw.text((x + 8, title_h + 25), f"{nfe_from_steps(step)} NFE", fill=(85, 85, 85))
+        draw.text((x + 8, title_h + 10), str(label), fill=(0, 0, 0))
 
     for row_index, row in enumerate(rows):
         y = title_h + header_h + row_index * cell_size
@@ -329,6 +342,7 @@ def build_identity_vs_canvas(
     dataset: str,
     rows: list[dict[str, Any]],
     steps: list[int],
+    display_labels: list[str],
     sample_dirs: dict[str, dict[int, Path]],
     subdirs: bool,
     cell_size: int,
@@ -339,7 +353,7 @@ def build_identity_vs_canvas(
     rows = ensure_rows(rows, dataset=dataset)
     label_w = 170 if dataset_key(dataset) == "imagenet64" else 120
     title_h = 34
-    header_h = 54
+    header_h = 34
     section_h = 26
     per_block_h = section_h + cell_size * len(rows)
     width = label_w + cell_size * len(steps)
@@ -348,10 +362,9 @@ def build_identity_vs_canvas(
     draw = PIL.ImageDraw.Draw(canvas)
 
     draw.text((10, 8), f"identity clock vs DG-TWFD | {dataset}", fill=(0, 0, 0))
-    for col, step in enumerate(steps):
+    for col, label in enumerate(display_labels):
         x = label_w + col * cell_size
-        draw.text((x + 8, title_h + 8), f"{step} st", fill=(0, 0, 0))
-        draw.text((x + 8, title_h + 25), f"{nfe_from_steps(step)} NFE", fill=(85, 85, 85))
+        draw.text((x + 8, title_h + 10), str(label), fill=(0, 0, 0))
 
     methods = ["identity_clock", "dg_twfd"]
     for method_index, method in enumerate(methods):
@@ -394,6 +407,7 @@ def build_diversity_canvas(
     cell_size: int,
     grid_cols: int,
     steps: int,
+    display_label: str | None = None,
 ) -> PIL.Image.Image:
     import PIL.Image
     import PIL.ImageDraw
@@ -406,7 +420,8 @@ def build_diversity_canvas(
     height = title_h + cell_size * grid_rows
     canvas = PIL.Image.new("RGB", (width, height), "white")
     draw = PIL.ImageDraw.Draw(canvas)
-    draw.text((8, 8), f"{pretty_method_label(method)} | {dataset} | {steps} st / {nfe_from_steps(steps)} NFE", fill=(0, 0, 0))
+    shown = str(display_label) if display_label is not None else str(steps)
+    draw.text((8, 8), f"{pretty_method_label(method)} | {dataset} | {shown}", fill=(0, 0, 0))
     for index, row in enumerate(rows):
         col = index % grid_cols
         row_idx = index // grid_cols

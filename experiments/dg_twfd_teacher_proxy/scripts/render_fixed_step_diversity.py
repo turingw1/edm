@@ -18,6 +18,7 @@ def main() -> None:
     parser.add_argument("--figure-id", required=True, help="Stable figure id.")
     parser.add_argument("--method", required=True, choices=["dg_twfd", "identity_clock"], help="Sampling clock.")
     parser.add_argument("--steps", required=True, type=int, help="Single step count.")
+    parser.add_argument("--display-label", default=None, help="Optional step label shown on the figure.")
     parser.add_argument("--seeds", required=True, help="Comma/range list of seeds.")
     parser.add_argument("--grid-cols", type=int, default=8, help="Number of columns in the diversity grid.")
     parser.add_argument("--class-idx", type=int, default=None, help="Optional fixed class id for conditional models.")
@@ -84,6 +85,7 @@ def main() -> None:
         cell_size=cell_size,
         grid_cols=int(args.grid_cols),
         steps=int(args.steps),
+        display_label=args.display_label,
     )
     payload = {
         "figure_id": args.figure_id,
@@ -92,6 +94,7 @@ def main() -> None:
         "checkpoint": cfg["checkpoint"],
         "seeds": [int(row["seed"]) for row in resolved_rows],
         "class_labels": [row.get("class_idx") for row in resolved_rows if "class_idx" in row] or None,
+        "display_label": args.display_label or str(int(args.steps)),
         "steps": int(args.steps),
         "nfe": 2 * int(args.steps) - 1 if int(args.steps) > 1 else 1,
         "sampler_settings": {

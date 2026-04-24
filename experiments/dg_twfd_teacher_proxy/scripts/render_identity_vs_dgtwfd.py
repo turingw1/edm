@@ -17,6 +17,7 @@ def main() -> None:
     parser.add_argument("--dataset", required=True, help="Dataset name for manifest validation.")
     parser.add_argument("--figure-id", required=True, help="Stable figure id.")
     parser.add_argument("--steps", required=True, help="Comma/range list of step counts.")
+    parser.add_argument("--display-labels", default=None, help="Comma-separated column labels shown on the figure.")
     parser.add_argument("--manifest", required=True, help="Fixed row manifest JSON.")
     parser.add_argument("--output-root", required=True, help="Root directory for raw sample images.")
     parser.add_argument("--figure-path", required=True, help="Final PDF path.")
@@ -37,6 +38,7 @@ def main() -> None:
         ensure_rows,
         load_json,
         parse_int_list,
+        parse_label_list,
         render_samples_for_rows,
         resolve_path,
         save_figure_bundle,
@@ -51,6 +53,7 @@ def main() -> None:
 
     rows = ensure_rows(list(manifest["rows"]), dataset=args.dataset)
     steps = parse_int_list(args.steps)
+    display_labels = parse_label_list(args.display_labels, expected_len=len(steps), fallback_ints=steps)
     batch_size = int(args.batch or cfg["batch"])
     device = torch.device(args.device)
     if device.type == "cuda" and not torch.cuda.is_available():
@@ -96,6 +99,7 @@ def main() -> None:
         dataset=args.dataset,
         rows=resolved_rows,
         steps=steps,
+        display_labels=display_labels,
         sample_dirs=sample_dirs,
         subdirs=subdirs,
         cell_size=cell_size,
@@ -107,6 +111,7 @@ def main() -> None:
         "checkpoint": cfg["checkpoint"],
         "seeds": [int(row["seed"]) for row in resolved_rows],
         "class_labels": [row.get("class_idx") for row in resolved_rows if "class_idx" in row] or None,
+        "display_labels": display_labels,
         "steps": [int(step) for step in steps],
         "nfe": [2 * int(step) - 1 if int(step) > 1 else 1 for step in steps],
         "sampler_settings": {
@@ -116,7 +121,13 @@ def main() -> None:
             "official_edm_sampler_kwargs": dict(cfg.get("official_edm_sampler_kwargs", {})),
             "use_fp16": use_fp16,
         },
-        "image_grid_layout": {"sections": methods, "rows_per_section": len(rows), "cols": len(steps), "cell_size": cell_size},
+        "image_grid_layout": {
+            "sections": methods,
+            "rows_per_section": len(rows),
+            "cols": len(steps),
+            "cell_size": cell_size,
+            "display_labels": display_labels,
+        },
         "raw_output_root": str(output_root / args.figure_id),
         "generation": generation,
         "cells": {

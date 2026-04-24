@@ -338,24 +338,35 @@ Optional appendix figure:
 
 ### Recommended Step Sets
 
-The exact NFE does not need to match the previous ablation tables. It only needs
-to make the visual story clear. Start from:
+The figure labels should follow the paper-facing step counts such as `1,2,4,8`.
+However, the actual EDM run may use larger step counts when the raw few-step
+quality is still too weak. In that case:
+
+- `--steps` controls the real EDM sampling steps;
+- `--display-labels` controls what is printed above each column in the figure;
+- the figure manifest records both, so the presentation layer stays honest.
+
+Start from:
 
 ```text
 CIFAR-10 DG-TWFD progression:
-4, 8, 12, 18
+actual steps 8, 16, 24, 32
+display labels 1, 2, 4, 8
 
 ImageNet64 DG-TWFD progression:
-16, 32, 64, 128
+actual steps 32, 64, 128, 256
+display labels 1, 2, 4, 8
 
 CIFAR-10 identity vs DG-TWFD:
-4, 8, 12, 18
+actual steps 8, 16, 24, 32
+display labels 1, 2, 4, 8
 
 ImageNet64 identity vs DG-TWFD:
-16, 32, 64, 128
+actual steps 32, 64, 128, 256
+display labels 1, 2, 4, 8
 
 Fixed-step diversity:
-CIFAR-10 at 8 or 12 steps
+CIFAR-10 at actual 24 or 32 steps, with paper label 4 or 8 if needed
 ```
 
 If the first visual pass shows weak contrast, update only the step list and keep
@@ -425,7 +436,8 @@ python experiments/dg_twfd_teacher_proxy/scripts/render_qualitative_grid.py \
   --dataset cifar10 \
   --figure-id DG_TWFD_cifar10_step_progression \
   --method dg_twfd \
-  --steps 4,8,12,18 \
+  --steps 8,16,24,32 \
+  --display-labels 1,2,4,8 \
   --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_fixed_rows.json \
   --output-root experiments/dg_twfd_teacher_proxy/outputs/cifar10 \
   --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_cifar10_step_progression.pdf \
@@ -443,7 +455,8 @@ python experiments/dg_twfd_teacher_proxy/scripts/render_qualitative_grid.py \
   --dataset imagenet64 \
   --figure-id DG_TWFD_imagenet64_step_progression \
   --method dg_twfd \
-  --steps 16,32,64,128 \
+  --steps 32,64,128,256 \
+  --display-labels 1,2,4,8 \
   --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_fixed_rows.json \
   --output-root experiments/dg_twfd_teacher_proxy/outputs/imagenet64 \
   --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_imagenet64_step_progression.pdf \
@@ -460,7 +473,8 @@ python experiments/dg_twfd_teacher_proxy/scripts/render_identity_vs_dgtwfd.py \
   --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_cifar10_target_ablation.json \
   --dataset cifar10 \
   --figure-id DG_TWFD_cifar10_identity_vs_full \
-  --steps 4,8,12,18 \
+  --steps 8,16,24,32 \
+  --display-labels 1,2,4,8 \
   --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_fixed_rows.json \
   --output-root experiments/dg_twfd_teacher_proxy/outputs/cifar10 \
   --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_cifar10_identity_vs_full.pdf \
@@ -477,7 +491,8 @@ python experiments/dg_twfd_teacher_proxy/scripts/render_identity_vs_dgtwfd.py \
   --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_imagenet64_target_ablation.json \
   --dataset imagenet64 \
   --figure-id DG_TWFD_imagenet64_identity_vs_full \
-  --steps 16,32,64,128 \
+  --steps 32,64,128,256 \
+  --display-labels 1,2,4,8 \
   --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_fixed_rows.json \
   --output-root experiments/dg_twfd_teacher_proxy/outputs/imagenet64 \
   --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_imagenet64_identity_vs_full.pdf \
@@ -496,7 +511,8 @@ python experiments/dg_twfd_teacher_proxy/scripts/render_fixed_step_diversity.py 
   --dataset cifar10 \
   --figure-id DG_TWFD_fixed_step_diversity \
   --method dg_twfd \
-  --steps 8 \
+  --steps 32 \
+  --display-label 8 \
   --seeds 0-63 \
   --grid-cols 8 \
   --output-root experiments/dg_twfd_teacher_proxy/outputs/cifar10 \
