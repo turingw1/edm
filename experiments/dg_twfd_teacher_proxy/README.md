@@ -268,3 +268,278 @@ count is controlled by `official_edm_steps`, while the proxy rows use
 `generation_steps=4`.
 
 These CSV files are intended to feed the final paper table directly.
+
+## Qualitative Figure Plan
+
+The next paper-facing qualitative package in this folder is intentionally small.
+It is meant to support three claims with the minimum number of figures:
+
+1. the same DG-TWFD generator setting improves steadily as the number of steps
+   increases;
+2. the same improvement pattern is not matched by an identity clock under the
+   same seeds, classes, and checkpoint;
+3. at a fixed good few-step setting, the result still shows basic diversity and
+   is not based on cherry-picked seeds.
+
+Only two methods are compared:
+
+- `DG-TWFD`
+- `identity_clock`
+
+In this qualitative package, both methods use the same pretrained EDM
+checkpoint. `DG-TWFD` means the non-identity EDM-style clock proxy based on the
+standard `rho` schedule, while `identity_clock` means pure linear sigma
+spacing. This section does not introduce a separately trained student model.
+
+All horizontally comparable figures must reuse:
+
+- the same checkpoint;
+- the same seed list;
+- the same class list for ImageNet64;
+- the same sampler family and noise settings.
+
+### Fixed Seed And Class Lists
+
+Use the following fixed lists for the first round. Do not hand-pick new examples
+after seeing the results unless the README is updated together with the new
+manifest.
+
+```text
+CIFAR-10 seeds:
+42, 123, 314, 512, 777, 1024
+
+ImageNet64 seeds:
+7, 19, 43, 87, 131, 211
+
+ImageNet64 classes:
+207, 250, 281, 409, 530, 751
+```
+
+The ImageNet64 list is paired row-wise: the first seed uses the first class,
+the second seed uses the second class, and so on.
+
+### Main Figures
+
+Use these figure ids and keep the naming stable:
+
+- `A1`: `DG_TWFD_cifar10_step_progression`
+- `A2`: `DG_TWFD_imagenet64_step_progression`
+- `B1`: `DG_TWFD_cifar10_identity_vs_full`
+- `B2`: `DG_TWFD_imagenet64_identity_vs_full`
+
+Optional appendix figure:
+
+- `C1`: `DG_TWFD_fixed_step_diversity`
+
+### Recommended Step Sets
+
+The exact NFE does not need to match the previous ablation tables. It only needs
+to make the visual story clear. Start from:
+
+```text
+CIFAR-10 DG-TWFD progression:
+4, 8, 12, 18
+
+ImageNet64 DG-TWFD progression:
+16, 32, 64, 128
+
+CIFAR-10 identity vs DG-TWFD:
+4, 8, 12, 18
+
+ImageNet64 identity vs DG-TWFD:
+16, 32, 64, 128
+
+Fixed-step diversity:
+CIFAR-10 at 8 or 12 steps
+```
+
+If the first visual pass shows weak contrast, update only the step list and keep
+the seeds and classes fixed.
+
+### Required Directory Layout
+
+The qualitative package should write into:
+
+```text
+experiments/dg_twfd_teacher_proxy/
+  outputs/
+    cifar10/
+    imagenet64/
+  figures/
+    main/
+    appendix/
+  manifests/
+```
+
+Those directories are already created in git with `.gitkeep` files so the
+server-side scripts can write into them directly.
+
+## Concrete Operation Commands
+
+The commands below are the agreed command contract for the qualitative package
+to be implemented in this folder. They are placed here so the later script work
+follows one stable interface instead of drifting across ad hoc server commands.
+
+Run from the EDM root:
+
+```bash
+cd /data2/yl7622/Zhengwei/DG-TWFD/refs/edm
+conda activate dg
+export PYTHONPATH="$PWD:${PYTHONPATH:-}"
+export DNNLIB_CACHE_DIR=/data2/yl7622/Zhengwei/DG-TWFD/.cache/dnnlib
+mkdir -p "$DNNLIB_CACHE_DIR"
+```
+
+### 1. Prepare fixed manifests
+
+Purpose: write the fixed seed and class lists once, so every later figure uses
+the same rows and can be regenerated exactly.
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/prepare_qualitative_manifests.py \
+  --cifar-seeds 42,123,314,512,777,1024 \
+  --imagenet-seeds 7,19,43,87,131,211 \
+  --imagenet-classes 207,250,281,409,530,751 \
+  --outdir experiments/dg_twfd_teacher_proxy/manifests
+```
+
+Expected outputs:
+
+```text
+experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_fixed_rows.json
+experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_fixed_rows.json
+```
+
+### 2. CIFAR-10 DG-TWFD step progression
+
+Purpose: generate Figure A1. Same seeds across increasing steps, DG-TWFD only.
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_qualitative_grid.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_cifar10_target_ablation.json \
+  --dataset cifar10 \
+  --figure-id DG_TWFD_cifar10_step_progression \
+  --method dg_twfd \
+  --steps 4,8,12,18 \
+  --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_fixed_rows.json \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/cifar10 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_cifar10_step_progression.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_step_progression.json
+```
+
+### 3. ImageNet64 DG-TWFD step progression
+
+Purpose: generate Figure A2. Same seed-class pairs across increasing steps,
+DG-TWFD only.
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_qualitative_grid.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_imagenet64_target_ablation.json \
+  --dataset imagenet64 \
+  --figure-id DG_TWFD_imagenet64_step_progression \
+  --method dg_twfd \
+  --steps 16,32,64,128 \
+  --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_fixed_rows.json \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/imagenet64 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_imagenet64_step_progression.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_step_progression.json
+```
+
+### 4. CIFAR-10 identity clock vs DG-TWFD
+
+Purpose: generate Figure B1. The upper half is identity clock, the lower half
+is DG-TWFD. Seeds and checkpoint must be identical across the two halves.
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_identity_vs_dgtwfd.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_cifar10_target_ablation.json \
+  --dataset cifar10 \
+  --figure-id DG_TWFD_cifar10_identity_vs_full \
+  --steps 4,8,12,18 \
+  --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_fixed_rows.json \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/cifar10 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_cifar10_identity_vs_full.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_identity_vs_full.json
+```
+
+### 5. ImageNet64 identity clock vs DG-TWFD
+
+Purpose: generate Figure B2. This is the highest-priority qualitative figure.
+Use exactly the same seed-class pairs in the identity and DG-TWFD rows.
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_identity_vs_dgtwfd.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_imagenet64_target_ablation.json \
+  --dataset imagenet64 \
+  --figure-id DG_TWFD_imagenet64_identity_vs_full \
+  --steps 16,32,64,128 \
+  --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_fixed_rows.json \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/imagenet64 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_imagenet64_identity_vs_full.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_identity_vs_full.json
+```
+
+### 6. Optional fixed-step diversity grid
+
+Purpose: generate Figure C1 only if the four main figures are already clean.
+Use one fixed few-step setting and many seeds. Do not add this before B2 is
+ready.
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_fixed_step_diversity.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_cifar10_target_ablation.json \
+  --dataset cifar10 \
+  --figure-id DG_TWFD_fixed_step_diversity \
+  --method dg_twfd \
+  --steps 8 \
+  --seeds 0-63 \
+  --grid-cols 8 \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/cifar10 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/appendix/DG_TWFD_fixed_step_diversity.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_fixed_step_diversity.json
+```
+
+## Required Metadata Per Figure
+
+Each final figure must be accompanied by:
+
+1. the assembled PDF figure;
+2. the raw individual sample images under `outputs/`;
+3. a manifest file under `manifests/`.
+
+The manifest must record at least:
+
+- figure id
+- dataset
+- method
+- checkpoint
+- seeds
+- class labels when applicable
+- steps or NFE
+- sampler settings
+- image grid layout
+- output paths
+- optional generation time
+- short note about the intended paper use
+
+## Paper Placement And Caption Drafts
+
+Suggested main-text figures:
+
+- `B2`: ImageNet64 identity vs DG-TWFD
+- `B1`: CIFAR-10 identity vs DG-TWFD
+- `A2`: ImageNet64 step progression
+- `A1`: CIFAR-10 step progression
+
+Suggested appendix figure:
+
+- `C1`: fixed-step diversity
+
+Short caption drafts:
+
+- `A1/A2`: "Using the same checkpoint and fixed seeds, DG-TWFD improves
+  progressively as the number of steps increases."
+- `B1/B2`: "Under the same checkpoint, seeds, and step counts, DG-TWFD yields
+  more stable refinement than the identity clock."
+- `C1`: "At a fixed few-step setting, DG-TWFD still produces a non-trivial
+  range of samples across seeds."

@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
-import PIL.Image
 import torch
 import torch.nn.functional as F
 
@@ -280,6 +279,8 @@ def generate_target_samples(
 
 
 def save_image_batch(images: torch.Tensor, *, batch_seeds: list[int], outdir: Path, subdirs: bool) -> None:
+    import PIL.Image
+
     images_np = (images * 127.5 + 128).clip(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
     for seed, image_np in zip(batch_seeds, images_np):
         image_dir = outdir / f"{seed - seed % 1000:06d}" if subdirs else outdir
