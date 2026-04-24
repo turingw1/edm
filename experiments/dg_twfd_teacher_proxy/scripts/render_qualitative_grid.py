@@ -19,6 +19,7 @@ def main() -> None:
     parser.add_argument("--method", required=True, choices=["dg_twfd", "identity_clock"], help="Sampling clock.")
     parser.add_argument("--steps", required=True, help="Comma/range list of step counts.")
     parser.add_argument("--display-labels", default=None, help="Comma-separated column labels shown on the figure.")
+    parser.add_argument("--sampler-mode", default="config", choices=["config", "deterministic"], help="Use config sampler settings or force deterministic sampling.")
     parser.add_argument("--manifest", required=True, help="Fixed row manifest JSON.")
     parser.add_argument("--output-root", required=True, help="Root directory for raw sample images.")
     parser.add_argument("--figure-path", required=True, help="Final PDF path.")
@@ -84,6 +85,7 @@ def main() -> None:
             device=device,
             subdirs=subdirs,
             overwrite=bool(args.overwrite),
+            sampler_mode=str(args.sampler_mode),
         )
         resolved_rows = list(stats.get("resolved_rows", resolved_rows))
         sample_dirs[int(step)] = step_dir
@@ -113,9 +115,11 @@ def main() -> None:
         "nfe": [2 * int(step) - 1 if int(step) > 1 else 1 for step in steps],
         "sampler_settings": {
             "clock": args.method,
+            "sampler_mode": str(args.sampler_mode),
             "sigma_min": float(cfg["sigma_min"]),
             "sigma_max": float(cfg["sigma_max"]),
             "rho": float(cfg["rho"]),
+            "effective_sampler_kwargs": generation_rows[0].get("sampler_kwargs", {}) if generation_rows else {},
             "official_edm_sampler_kwargs": dict(cfg.get("official_edm_sampler_kwargs", {})),
             "use_fp16": use_fp16,
         },

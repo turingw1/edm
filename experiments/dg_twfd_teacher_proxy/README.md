@@ -346,6 +346,18 @@ quality is still too weak. In that case:
 - `--display-labels` controls what is printed above each column in the figure;
 - the figure manifest records both, so the presentation layer stays honest.
 
+For ImageNet64, there are now two valid qualitative modes:
+
+- `--sampler-mode config`:
+  uses the official EDM-style ImageNet64 sampler settings from the config,
+  including churn. This is suitable for showing that different step counts stay
+  within the same semantic class, but samples may differ as different class-
+  consistent instances.
+- `--sampler-mode deterministic`:
+  forces `S_churn=0` and `S_noise=1`, removing stochastic churn. This is the
+  preferred mode when the goal is to show one class-conditioned instance getting
+  progressively refined as the step count increases.
+
 Start from:
 
 ```text
@@ -457,10 +469,28 @@ python experiments/dg_twfd_teacher_proxy/scripts/render_qualitative_grid.py \
   --method dg_twfd \
   --steps 32,64,128,256 \
   --display-labels 1,2,4,8 \
+  --sampler-mode config \
   --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_fixed_rows.json \
   --output-root experiments/dg_twfd_teacher_proxy/outputs/imagenet64 \
   --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_imagenet64_step_progression.pdf \
   --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_step_progression.json
+```
+
+Deterministic refinement variant for ImageNet64:
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_qualitative_grid.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_imagenet64_target_ablation.json \
+  --dataset imagenet64 \
+  --figure-id DG_TWFD_imagenet64_step_progression_deterministic \
+  --method dg_twfd \
+  --steps 32,64,128,256 \
+  --display-labels 1,2,4,8 \
+  --sampler-mode deterministic \
+  --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_fixed_rows.json \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/imagenet64 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_imagenet64_step_progression_deterministic.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_step_progression_deterministic.json
 ```
 
 ### 4. CIFAR-10 identity clock vs DG-TWFD
@@ -493,10 +523,27 @@ python experiments/dg_twfd_teacher_proxy/scripts/render_identity_vs_dgtwfd.py \
   --figure-id DG_TWFD_imagenet64_identity_vs_full \
   --steps 32,64,128,256 \
   --display-labels 1,2,4,8 \
+  --sampler-mode config \
   --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_fixed_rows.json \
   --output-root experiments/dg_twfd_teacher_proxy/outputs/imagenet64 \
   --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_imagenet64_identity_vs_full.pdf \
   --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_identity_vs_full.json
+```
+
+Deterministic refinement variant for ImageNet64:
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_identity_vs_dgtwfd.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_imagenet64_target_ablation.json \
+  --dataset imagenet64 \
+  --figure-id DG_TWFD_imagenet64_identity_vs_full_deterministic \
+  --steps 32,64,128,256 \
+  --display-labels 1,2,4,8 \
+  --sampler-mode deterministic \
+  --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_fixed_rows.json \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/imagenet64 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_imagenet64_identity_vs_full_deterministic.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_identity_vs_full_deterministic.json
 ```
 
 ### 6. Optional fixed-step diversity grid

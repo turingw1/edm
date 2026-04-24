@@ -12,6 +12,7 @@ from .edm_proxy import StackedRandomGenerator, edm_sigma_schedule, save_image_ba
 
 
 METHODS = ("dg_twfd", "identity_clock")
+SAMPLER_MODES = ("config", "deterministic")
 
 
 def parse_int_list(text: str) -> list[int]:
@@ -87,6 +88,24 @@ def nfe_from_steps(steps: int) -> int:
     if steps <= 1:
         return 1
     return 2 * steps - 1
+
+
+def sampler_kwargs_for_mode(cfg: dict[str, Any], *, sampler_mode: str) -> dict[str, Any]:
+    if sampler_mode not in SAMPLER_MODES:
+        raise ValueError(f"Unsupported sampler_mode {sampler_mode}; expected {SAMPLER_MODES}")
+    base = dict(cfg.get("official_edm_sampler_kwargs", {}))
+    if sampler_mode == "config":
+        return base
+    deterministic = dict(base)
+    deterministic.update(
+        {
+            "S_churn": 0.0,
+            "S_min": 0.0,
+            "S_max": float("inf"),
+            "S_noise": 1.0,
+        }
+    )
+    return deterministic
 
 
 def linear_sigma_schedule(
@@ -230,12 +249,20 @@ def render_samples_for_rows(
     device: torch.device,
     subdirs: bool,
     overwrite: bool,
+    sampler_mode: str,
 ) -> dict[str, Any]:
     rows = resolve_rows_for_model(net, rows=rows, dataset=str(cfg["dataset"]))
     seeds = [int(row["seed"]) for row in rows]
     expected = [image_path_for_seed(outdir, seed, subdirs=subdirs) for seed in seeds]
     if not overwrite and expected and all(path.is_file() for path in expected):
-        return {"elapsed_sec": 0.0, "num_images": len(seeds), "skipped": True, "resolved_rows": rows}
+        return {
+            "elapsed_sec": 0.0,
+            "num_images": len(seeds),
+            "skipped": True,
+            "resolved_rows": rows,
+            "sampler_mode": sampler_mode,
+            "sampler_kwargs": sampler_kwargs_for_mode(cfg, sampler_mode=sampler_mode),
+        }
 
     sigmas = schedule_for_method(
         net,
@@ -246,7 +273,7 @@ def render_samples_for_rows(
         rho=float(cfg["rho"]),
         device=device,
     )
-    sampler_kwargs = dict(cfg.get("official_edm_sampler_kwargs", {}))
+    sampler_kwargs = sampler_kwargs_for_mode(cfg, sampler_mode=sampler_mode)
     start_time = time.time()
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -272,6 +299,8 @@ def render_samples_for_rows(
         "num_images": len(seeds),
         "skipped": False,
         "resolved_rows": rows,
+        "sampler_mode": sampler_mode,
+        "sampler_kwargs": sampler_kwargs,
     }
 
 

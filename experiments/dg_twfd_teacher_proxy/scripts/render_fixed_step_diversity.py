@@ -19,6 +19,7 @@ def main() -> None:
     parser.add_argument("--method", required=True, choices=["dg_twfd", "identity_clock"], help="Sampling clock.")
     parser.add_argument("--steps", required=True, type=int, help="Single step count.")
     parser.add_argument("--display-label", default=None, help="Optional step label shown on the figure.")
+    parser.add_argument("--sampler-mode", default="config", choices=["config", "deterministic"], help="Use config sampler settings or force deterministic sampling.")
     parser.add_argument("--seeds", required=True, help="Comma/range list of seeds.")
     parser.add_argument("--grid-cols", type=int, default=8, help="Number of columns in the diversity grid.")
     parser.add_argument("--class-idx", type=int, default=None, help="Optional fixed class id for conditional models.")
@@ -74,6 +75,7 @@ def main() -> None:
         device=device,
         subdirs=subdirs,
         overwrite=bool(args.overwrite),
+        sampler_mode=str(args.sampler_mode),
     )
     resolved_rows = list(stats.get("resolved_rows", rows))
     canvas = build_diversity_canvas(
@@ -99,9 +101,11 @@ def main() -> None:
         "nfe": 2 * int(args.steps) - 1 if int(args.steps) > 1 else 1,
         "sampler_settings": {
             "clock": args.method,
+            "sampler_mode": str(args.sampler_mode),
             "sigma_min": float(cfg["sigma_min"]),
             "sigma_max": float(cfg["sigma_max"]),
             "rho": float(cfg["rho"]),
+            "effective_sampler_kwargs": stats.get("sampler_kwargs", {}),
             "official_edm_sampler_kwargs": dict(cfg.get("official_edm_sampler_kwargs", {})),
             "use_fp16": use_fp16,
         },
