@@ -191,6 +191,20 @@ def ensure_rows(rows: list[dict[str, Any]], *, dataset: str) -> list[dict[str, A
     return fixed
 
 
+def resolve_rows_for_model(net, *, rows: list[dict[str, Any]], dataset: str) -> list[dict[str, Any]]:
+    fixed = ensure_rows(rows, dataset=dataset)
+    label_dim = int(getattr(net, "label_dim", 0) or 0)
+    if label_dim <= 0:
+        return fixed
+    resolved: list[dict[str, Any]] = []
+    for row in fixed:
+        item = dict(row)
+        if item.get("class_idx") is None:
+            item["class_idx"] = int(item["seed"]) % label_dim
+        resolved.append(item)
+    return resolved
+
+
 def render_samples_for_rows(
     net,
     *,
@@ -204,11 +218,11 @@ def render_samples_for_rows(
     subdirs: bool,
     overwrite: bool,
 ) -> dict[str, Any]:
-    rows = ensure_rows(rows, dataset=str(cfg["dataset"]))
+    rows = resolve_rows_for_model(net, rows=rows, dataset=str(cfg["dataset"]))
     seeds = [int(row["seed"]) for row in rows]
     expected = [image_path_for_seed(outdir, seed, subdirs=subdirs) for seed in seeds]
     if not overwrite and expected and all(path.is_file() for path in expected):
-        return {"elapsed_sec": 0.0, "num_images": len(seeds), "skipped": True}
+        return {"elapsed_sec": 0.0, "num_images": len(seeds), "skipped": True, "resolved_rows": rows}
 
     sigmas = schedule_for_method(
         net,
@@ -244,6 +258,7 @@ def render_samples_for_rows(
         "elapsed_sec": float(time.time() - start_time),
         "num_images": len(seeds),
         "skipped": False,
+        "resolved_rows": rows,
     }
 
 

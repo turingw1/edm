@@ -74,10 +74,11 @@ def main() -> None:
         subdirs=subdirs,
         overwrite=bool(args.overwrite),
     )
+    resolved_rows = list(stats.get("resolved_rows", rows))
     canvas = build_diversity_canvas(
         dataset=args.dataset,
         method=args.method,
-        rows=rows,
+        rows=resolved_rows,
         sample_dir=sample_dir,
         subdirs=subdirs,
         cell_size=cell_size,
@@ -89,8 +90,8 @@ def main() -> None:
         "dataset": cfg["dataset"],
         "method": args.method,
         "checkpoint": cfg["checkpoint"],
-        "seeds": [int(row["seed"]) for row in rows],
-        "class_labels": [row.get("class_idx") for row in rows if "class_idx" in row] or None,
+        "seeds": [int(row["seed"]) for row in resolved_rows],
+        "class_labels": [row.get("class_idx") for row in resolved_rows if "class_idx" in row] or None,
         "steps": int(args.steps),
         "nfe": 2 * int(args.steps) - 1 if int(args.steps) > 1 else 1,
         "sampler_settings": {
@@ -103,7 +104,7 @@ def main() -> None:
         },
         "image_grid_layout": {"rows": int((len(rows) + args.grid_cols - 1) / args.grid_cols), "cols": int(args.grid_cols), "cell_size": cell_size},
         "raw_output_root": str(sample_dir),
-        "generation": stats,
+        "generation": {key: value for key, value in stats.items() if key != "resolved_rows"},
         "note": "Fixed-step diversity grid with many seeds under one method.",
     }
     outputs = save_figure_bundle(canvas=canvas, figure_path=figure_path, manifest_path=manifest_path, manifest_payload=payload)

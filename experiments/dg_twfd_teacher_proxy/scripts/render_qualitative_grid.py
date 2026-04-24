@@ -67,11 +67,12 @@ def main() -> None:
 
     sample_dirs: dict[int, Path] = {}
     generation_rows: list[dict] = []
+    resolved_rows = rows
     for step in steps:
         step_dir = output_root / args.figure_id / args.method / f"steps{step}"
         stats = render_samples_for_rows(
             net,
-            rows=rows,
+            rows=resolved_rows,
             method=args.method,
             num_steps=int(step),
             cfg=cfg,
@@ -81,13 +82,16 @@ def main() -> None:
             subdirs=subdirs,
             overwrite=bool(args.overwrite),
         )
+        resolved_rows = list(stats.get("resolved_rows", resolved_rows))
         sample_dirs[int(step)] = step_dir
-        generation_rows.append({"steps": int(step), "sample_dir": str(step_dir), **stats})
+        row_stats = dict(stats)
+        row_stats.pop("resolved_rows", None)
+        generation_rows.append({"steps": int(step), "sample_dir": str(step_dir), **row_stats})
 
     canvas = build_progression_canvas(
         dataset=args.dataset,
         method=args.method,
-        rows=rows,
+        rows=resolved_rows,
         steps=steps,
         sample_dirs=sample_dirs,
         subdirs=subdirs,
@@ -98,8 +102,8 @@ def main() -> None:
         "dataset": cfg["dataset"],
         "method": args.method,
         "checkpoint": cfg["checkpoint"],
-        "seeds": [int(row["seed"]) for row in rows],
-        "class_labels": [row.get("class_idx") for row in rows if "class_idx" in row] or None,
+        "seeds": [int(row["seed"]) for row in resolved_rows],
+        "class_labels": [row.get("class_idx") for row in resolved_rows if "class_idx" in row] or None,
         "steps": [int(step) for step in steps],
         "nfe": [2 * int(step) - 1 if int(step) > 1 else 1 for step in steps],
         "sampler_settings": {
@@ -114,7 +118,7 @@ def main() -> None:
         "raw_output_root": str(output_root / args.figure_id / args.method),
         "generation": generation_rows,
         "cells": cell_records(
-            rows=rows,
+            rows=resolved_rows,
             steps=steps,
             sample_dirs=sample_dirs,
             subdirs=subdirs,

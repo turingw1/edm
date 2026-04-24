@@ -318,6 +318,11 @@ ImageNet64 classes:
 The ImageNet64 list is paired row-wise: the first seed uses the first class,
 the second seed uses the second class, and so on.
 
+For CIFAR-10, the public EDM checkpoint is also class-conditional. If a row
+manifest does not specify `class_idx`, the qualitative scripts deterministically
+derive it as `seed % label_dim` and record the resolved class ids in the final
+figure manifest so the comparison remains fixed across methods and steps.
+
 ### Main Figures
 
 Use these figure ids and keep the naming stable:
