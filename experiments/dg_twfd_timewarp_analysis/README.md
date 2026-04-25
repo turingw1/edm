@@ -54,7 +54,10 @@ Lower is more uniform.
 ## Visualization
 
 The trajectory figure flattens saved states and projects them to 2D with PCA.
-The path is colored by local defect heat. The plotting code now labels the
+Each single-trajectory heatmap is now colored by that specific trajectory's
+defect values rather than only by the across-trajectory mean. The plotting code
+also writes multi-trajectory galleries for the top schedule-gap seeds. The path
+is colored by local defect heat, and the plotting code now labels the
 endpoints of `8` coarse sections over the default `64` bins, so the marked
 time-point indices are `0, 8, 16, ..., 64`. This matches `8` equal sections of
 the defect profile rather than the older sparse `8`-point heuristic that
@@ -71,6 +74,12 @@ trajectory deterministically from the fixed seed pool by maximizing the average
 state-space gap between the identity and warped schedules for the same seed.
 This keeps the selection reproducible while making the schedule difference more
 visible in the paper figure.
+
+If the mean defect profile looks too flat, the reason is usually not that the
+trajectory itself is featureless; it is that the original plot averaged defect
+across all sampled trajectories. The current version keeps the mean curve, but
+also stores a per-trajectory defect matrix and shows interquartile bands in the
+profile plots, so local variability is no longer hidden by the average.
 
 ## Setup
 
@@ -179,6 +188,8 @@ results/defect_dg_twfd_warp.csv
 results/defect_summary.csv
 results/summary.md
 results/trajectory_figure_manifest.json
+results/defect_identity_matrix.npz
+results/defect_dg_twfd_warp_matrix.npz
 ```
 
 Use this set to argue: after time parameterization, defect is more uniform and
@@ -188,6 +199,9 @@ sampling points are allocated more reasonably along the trajectory.
 for the selected trajectory, including the selected seed, sigma range, `rho`,
 label-section setting, and short paper-ready notes for the identity and warped
 trajectory figures.
+
+`defect_identity_matrix.npz` and `defect_dg_twfd_warp_matrix.npz` store the
+per-trajectory defect values used by the heatmaps and percentile bands.
 
 ## Command 5: FID Sweep For Final Samples
 

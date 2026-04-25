@@ -20,7 +20,10 @@ from utils.timewarp_core import (  # noqa: E402
     plot_defect_comparison,
     plot_defect_profile,
     plot_trajectory_2d,
+    plot_trajectory_gallery,
+    rank_trajectory_indices,
     resolve_path,
+    save_defect_matrix,
     sample_trajectories,
     save_schedule_csv,
     save_trajectory,
@@ -109,13 +112,21 @@ def write_summary_md(
         for name in [
             "trajectory_identity.png",
             "trajectory_dg_twfd_warp.png",
+            "trajectory_identity_gallery.png",
+            "trajectory_dg_twfd_warp_gallery.png",
             "defect_profile_identity.png",
             "defect_profile_dg_twfd_warp.png",
             "defect_profile_comparison.png",
         ]:
             f.write(f"- `{figure_dir / name}`\n")
         f.write("\n## Data\n\n")
-        for name in ["defect_identity.csv", "defect_dg_twfd_warp.csv", "defect_summary.csv"]:
+        for name in [
+            "defect_identity.csv",
+            "defect_dg_twfd_warp.csv",
+            "defect_identity_matrix.npz",
+            "defect_dg_twfd_warp_matrix.npz",
+            "defect_summary.csv",
+        ]:
             f.write(f"- `{result_dir / name}`\n")
         f.write(f"- `{result_dir / 'trajectory_figure_manifest.json'}`\n")
 
@@ -158,6 +169,12 @@ def main() -> None:
         type=int,
         default=8,
         help="Number of coarse sections used when labeling trajectory time points.",
+    )
+    parser.add_argument(
+        "--gallery-top-k",
+        type=int,
+        default=4,
+        help="Number of trajectories to include in the multi-trajectory heatmap gallery.",
     )
     args = parser.parse_args()
 
@@ -227,15 +244,18 @@ def main() -> None:
         metadata=identity_meta,
     )
     save_schedule_csv(identity_dir / "schedule.csv", sigmas=identity_sigmas.detach().cpu().numpy(), param=identity_param)
-    identity_rows, identity_summary = compute_defect_rows(
+    identity_rows, identity_summary, identity_matrix = compute_defect_rows(
         net,
         trajectory={"states": identity_states, "sigmas": identity_sigmas.cpu(), "class_labels": identity_labels, "metadata": identity_meta},
         batch_size=defect_batch,
         defect_eps=float(cfg["defect_eps"]),
         device=device,
+        return_matrix=True,
     )
     identity_csv = result_dir / "defect_identity.csv"
+    identity_matrix_path = result_dir / "defect_identity_matrix.npz"
     write_defect_csv(identity_csv, identity_rows)
+    save_defect_matrix(identity_matrix_path, defect_matrix=identity_matrix, seeds=seeds, time_param="identity")
     summaries.append(identity_summary)
     trajectories["identity"] = identity_traj
     defect_csvs["identity"] = identity_csv
@@ -280,15 +300,18 @@ def main() -> None:
     warp_traj = warp_dir / "trajectory.pt"
     save_trajectory(warp_traj, states=warp_states, sigmas=warp_sigmas, labels=warp_labels, seeds=seeds, metadata=warp_meta)
     save_schedule_csv(warp_dir / "schedule.csv", sigmas=warp_sigmas.detach().cpu().numpy(), param=warp_param)
-    warp_rows, warp_summary = compute_defect_rows(
+    warp_rows, warp_summary, warp_matrix = compute_defect_rows(
         net,
         trajectory={"states": warp_states, "sigmas": warp_sigmas.cpu(), "class_labels": warp_labels, "metadata": warp_meta},
         batch_size=defect_batch,
         defect_eps=float(cfg["defect_eps"]),
         device=device,
+        return_matrix=True,
     )
     warp_csv = result_dir / "defect_dg_twfd_warp.csv"
+    warp_matrix_path = result_dir / "defect_dg_twfd_warp_matrix.npz"
     write_defect_csv(warp_csv, warp_rows)
+    save_defect_matrix(warp_matrix_path, defect_matrix=warp_matrix, seeds=seeds, time_param="dg_twfd_warp")
     summaries.append(warp_summary)
     trajectories["dg_twfd_warp"] = warp_traj
     defect_csvs["dg_twfd_warp"] = warp_csv
@@ -300,12 +323,19 @@ def main() -> None:
         mode=args.trajectory_select,
     )
     selected_seed = seeds[selected_index]
+    gallery_indices, gallery_scores = rank_trajectory_indices(
+        identity_states=identity_states,
+        warp_states=warp_states,
+        top_k=args.gallery_top_k,
+    )
     write_json(
         result_dir / "defect_summary.json",
         {
             "summaries": summaries,
             "selected_trajectory_index": selected_index,
             "selected_seed": selected_seed,
+            "gallery_indices": gallery_indices,
+            "gallery_seeds": [seeds[idx] for idx in gallery_indices],
             "label_sections": args.label_sections,
             "config_snapshot": config_snapshot,
             **selection_meta,
@@ -322,6 +352,9 @@ def main() -> None:
             "selected_trajectory_index": selected_index,
             "selected_seed": selected_seed,
             "selection_mode": args.trajectory_select,
+            "gallery_indices": gallery_indices,
+            "gallery_seeds": [seeds[idx] for idx in gallery_indices],
+            "gallery_scores": [float(gallery_scores[idx]) for idx in gallery_indices],
             "label_sections": args.label_sections,
             "sigma_min": float(cfg["sigma_min"]),
             "sigma_max": float(cfg["sigma_max"]),
@@ -332,6 +365,7 @@ def main() -> None:
                     "figure_id": "trajectory_identity",
                     "time_param": "identity",
                     "path": str(figure_dir / "trajectory_identity.png"),
+                    "defect_matrix_path": str(identity_matrix_path),
                     "schedule_description": "linear sigma spacing from sigma_max to sigma_min, followed by the final jump to 0",
                     "paper_note": (
                         "Teacher-side EDM trajectory under linear sigma spacing. "
@@ -342,11 +376,24 @@ def main() -> None:
                     "figure_id": "trajectory_dg_twfd_warp",
                     "time_param": "dg_twfd_warp",
                     "path": str(figure_dir / "trajectory_dg_twfd_warp.png"),
+                    "defect_matrix_path": str(warp_matrix_path),
                     "schedule_description": "EDM rho schedule followed by a monotone defect-derived warp",
                     "paper_note": (
                         "Teacher-side EDM trajectory under rho-based DG-TWFD-style time reparameterization. "
                         "Higher-defect intervals receive more resolution while the seed and checkpoint stay fixed."
                     ),
+                },
+                {
+                    "figure_id": "trajectory_identity_gallery",
+                    "time_param": "identity",
+                    "path": str(figure_dir / "trajectory_identity_gallery.png"),
+                    "paper_note": "Top-k identity trajectories selected by schedule-gap ranking; useful for showing that the mechanism is not confined to a single seed.",
+                },
+                {
+                    "figure_id": "trajectory_dg_twfd_warp_gallery",
+                    "time_param": "dg_twfd_warp",
+                    "path": str(figure_dir / "trajectory_dg_twfd_warp_gallery.png"),
+                    "paper_note": "Top-k DG-TWFD trajectories for the same fixed seeds as the identity gallery, enabling direct multi-seed heatmap comparison.",
                 },
             ],
         },
@@ -358,6 +405,7 @@ def main() -> None:
         out_png=figure_dir / "trajectory_identity.png",
         out_pdf=figure_dir / "trajectory_identity.pdf",
         trajectory_index=selected_index,
+        defect_matrix_path=identity_matrix_path,
         label_sections=args.label_sections,
         title="identity trajectory with defect heat",
     )
@@ -367,17 +415,40 @@ def main() -> None:
         out_png=figure_dir / "trajectory_dg_twfd_warp.png",
         out_pdf=figure_dir / "trajectory_dg_twfd_warp.pdf",
         trajectory_index=selected_index,
+        defect_matrix_path=warp_matrix_path,
         label_sections=args.label_sections,
         title="DG-TWFD warped trajectory with defect heat",
     )
+    plot_trajectory_gallery(
+        trajectory_path=trajectories["identity"],
+        defect_csv=defect_csvs["identity"],
+        defect_matrix_path=identity_matrix_path,
+        out_png=figure_dir / "trajectory_identity_gallery.png",
+        out_pdf=figure_dir / "trajectory_identity_gallery.pdf",
+        trajectory_indices=gallery_indices,
+        label_sections=args.label_sections,
+        title="identity multi-trajectory defect heatmaps",
+    )
+    plot_trajectory_gallery(
+        trajectory_path=trajectories["dg_twfd_warp"],
+        defect_csv=defect_csvs["dg_twfd_warp"],
+        defect_matrix_path=warp_matrix_path,
+        out_png=figure_dir / "trajectory_dg_twfd_warp_gallery.png",
+        out_pdf=figure_dir / "trajectory_dg_twfd_warp_gallery.pdf",
+        trajectory_indices=gallery_indices,
+        label_sections=args.label_sections,
+        title="DG-TWFD warped multi-trajectory defect heatmaps",
+    )
     plot_defect_profile(
         defect_csv=defect_csvs["identity"],
+        defect_matrix_path=identity_matrix_path,
         out_png=figure_dir / "defect_profile_identity.png",
         out_pdf=figure_dir / "defect_profile_identity.pdf",
         title="identity interval defect",
     )
     plot_defect_profile(
         defect_csv=defect_csvs["dg_twfd_warp"],
+        defect_matrix_path=warp_matrix_path,
         out_png=figure_dir / "defect_profile_dg_twfd_warp.png",
         out_pdf=figure_dir / "defect_profile_dg_twfd_warp.pdf",
         title="DG-TWFD warped interval defect",
@@ -385,6 +456,8 @@ def main() -> None:
     plot_defect_comparison(
         identity_csv=defect_csvs["identity"],
         warp_csv=defect_csvs["dg_twfd_warp"],
+        identity_matrix_path=identity_matrix_path,
+        warp_matrix_path=warp_matrix_path,
         out_png=figure_dir / "defect_profile_comparison.png",
         out_pdf=figure_dir / "defect_profile_comparison.pdf",
     )

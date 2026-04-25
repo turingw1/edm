@@ -497,7 +497,8 @@ def compute_defect_rows(
     batch_size: int,
     defect_eps: float,
     device: torch.device,
-) -> tuple[list[dict], dict]:
+    return_matrix: bool = False,
+) -> tuple[list[dict], dict] | tuple[list[dict], dict, np.ndarray]:
     states = trajectory["states"]
     sigmas = trajectory["sigmas"].to(device=device, dtype=torch.float32)
     labels = trajectory.get("class_labels")
@@ -514,6 +515,7 @@ def compute_defect_rows(
     tau = np.asarray(metadata.get("tau", np.linspace(0.0, 1.0, num_points)), dtype=np.float64)
     rows: list[dict] = []
     all_defects: list[float] = []
+    defect_matrix = np.full((num_samples, num_points - 1), np.nan, dtype=np.float64)
 
     for interval_index in range(num_points - 1):
         per_interval: list[float] = []
@@ -531,6 +533,8 @@ def compute_defect_rows(
             numerator = mse_per_sample(direct, composed)
             denominator = (float(defect_eps) + mse_per_sample(direct, x_i)).clamp_min(float(defect_eps))
             defect = numerator / denominator
+            defect_np = defect.detach().cpu().numpy().astype(np.float64)
+            defect_matrix[start:end, interval_index] = defect_np
             finite = torch.isfinite(defect)
             if finite.any():
                 per_interval.extend(defect[finite].detach().cpu().numpy().astype(np.float64).tolist())
@@ -586,6 +590,8 @@ def compute_defect_rows(
         "min_defect": min_defect,
         "defect_uniformity_ratio": uniformity,
     }
+    if return_matrix:
+        return rows, summary, defect_matrix
     return rows, summary
 
 
@@ -635,6 +641,21 @@ def write_summary_csv(path: str | Path, summaries: list[dict]) -> None:
             writer.writerow({key: summary.get(key, "") for key in fieldnames})
 
 
+def save_defect_matrix(path: str | Path, *, defect_matrix: np.ndarray, seeds: list[int], time_param: str) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(path, defect_matrix=np.asarray(defect_matrix, dtype=np.float64), seeds=np.asarray(seeds, dtype=np.int64), time_param=time_param)
+
+
+def load_defect_matrix(path: str | Path) -> dict:
+    payload = np.load(Path(path), allow_pickle=False)
+    return {
+        "defect_matrix": payload["defect_matrix"],
+        "seeds": payload["seeds"].tolist(),
+        "time_param": str(payload["time_param"]),
+    }
+
+
 def derive_warp_weights_from_defect(rows: list[dict], *, floor: float = 0.05, power: float = 1.0) -> list[float]:
     values = np.asarray([float(row["defect_mean"]) for row in rows], dtype=np.float64)
     values = np.where(np.isfinite(values), values, np.nanmedian(values[np.isfinite(values)]) if np.isfinite(values).any() else 1.0)
@@ -657,6 +678,12 @@ def schedule_gap_scores(identity_states: torch.Tensor, warp_states: torch.Tensor
         raise ValueError("identity_states and warp_states must share the same shape")
     diff = (identity_states - warp_states).to(torch.float32).square().flatten(2).mean(dim=2).mean(dim=1)
     return diff.detach().cpu().numpy().astype(np.float64)
+
+
+def rank_trajectory_indices(*, identity_states: torch.Tensor, warp_states: torch.Tensor, top_k: int) -> tuple[list[int], np.ndarray]:
+    scores = schedule_gap_scores(identity_states, warp_states)
+    order = np.argsort(-scores)
+    return order[: min(int(top_k), len(order))].astype(np.int64).tolist(), scores
 
 
 def select_trajectory_index(
@@ -698,6 +725,7 @@ def plot_trajectory_2d(
     out_png: str | Path,
     out_pdf: str | Path | None = None,
     trajectory_index: int = 0,
+    defect_matrix_path: str | Path | None = None,
     label_sections: int = 8,
     title: str | None = None,
 ) -> None:
@@ -707,9 +735,13 @@ def plot_trajectory_2d(
     trajectory = load_trajectory(trajectory_path)
     states = trajectory["states"]
     metadata = trajectory.get("metadata", {})
-    rows = read_defect_csv(defect_csv)
     coords = pca_2d(states, trajectory_index=trajectory_index)
-    defects = np.asarray([float(row["defect_mean"]) for row in rows], dtype=np.float64)
+    if defect_matrix_path is not None:
+        defect_payload = load_defect_matrix(defect_matrix_path)
+        defects = np.asarray(defect_payload["defect_matrix"][int(trajectory_index)], dtype=np.float64)
+    else:
+        rows = read_defect_csv(defect_csv)
+        defects = np.asarray([float(row["defect_mean"]) for row in rows], dtype=np.float64)
     if defects.size == 0:
         defects = np.zeros(max(len(coords) - 1, 1), dtype=np.float64)
     defects = np.where(np.isfinite(defects), defects, np.nanmedian(defects[np.isfinite(defects)]) if np.isfinite(defects).any() else 0.0)
@@ -773,11 +805,95 @@ def plot_trajectory_2d(
         fig.savefig(out_pdf)
     plt.close(fig)
 
+
+def plot_trajectory_gallery(
+    *,
+    trajectory_path: str | Path,
+    defect_csv: str | Path,
+    out_png: str | Path,
+    out_pdf: str | Path | None = None,
+    trajectory_indices: list[int],
+    defect_matrix_path: str | Path | None = None,
+    label_sections: int = 8,
+    title: str | None = None,
+) -> None:
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+
+    trajectory = load_trajectory(trajectory_path)
+    states = trajectory["states"]
+    seeds = trajectory.get("seeds", [])
+    metadata = trajectory.get("metadata", {})
+    rows = read_defect_csv(defect_csv)
+    mean_defects = np.asarray([float(row["defect_mean"]) for row in rows], dtype=np.float64)
+    defect_payload = load_defect_matrix(defect_matrix_path) if defect_matrix_path is not None else None
+
+    indices = [int(idx) for idx in trajectory_indices]
+    n = len(indices)
+    ncols = min(2, max(1, n))
+    nrows = int(np.ceil(n / ncols))
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(4.7 * ncols, 3.3 * nrows), dpi=180, constrained_layout=True)
+    axes_arr = np.atleast_1d(axes).reshape(nrows, ncols)
+
+    finite_values = mean_defects[np.isfinite(mean_defects)]
+    if defect_payload is not None:
+        per_traj = np.asarray(defect_payload["defect_matrix"], dtype=np.float64)
+        finite_matrix = per_traj[np.isfinite(per_traj)]
+        if finite_matrix.size:
+            finite_values = finite_matrix
+    if finite_values.size:
+        vmin, vmax = np.percentile(finite_values, [5, 95])
+        if vmax <= vmin:
+            vmax = vmin + 1.0e-12
+    else:
+        vmin, vmax = 0.0, 1.0
+
+    for ax in axes_arr.flat[n:]:
+        ax.axis("off")
+
+    collection_for_colorbar = None
+    for ax, trajectory_index in zip(axes_arr.flat, indices):
+        coords = pca_2d(states, trajectory_index=trajectory_index)
+        if defect_payload is not None:
+            defects = np.asarray(defect_payload["defect_matrix"][trajectory_index], dtype=np.float64)
+        else:
+            defects = mean_defects.copy()
+        defects = np.where(np.isfinite(defects), defects, np.nanmedian(defects[np.isfinite(defects)]) if np.isfinite(defects).any() else 0.0)
+        segment_values = np.asarray([defects[min(i, len(defects) - 1)] for i in range(len(coords) - 1)], dtype=np.float64)
+        segments = np.stack([coords[:-1], coords[1:]], axis=1)
+        collection = LineCollection(segments, cmap="inferno", linewidths=1.8)
+        collection.set_array(segment_values)
+        collection.set_clim(vmin, vmax)
+        ax.add_collection(collection)
+        ax.scatter(coords[:, 0], coords[:, 1], color="white", edgecolor="black", linewidth=0.2, s=8, zorder=3)
+        ax.autoscale()
+        seed_text = f"seed {seeds[trajectory_index]}" if trajectory_index < len(seeds) else f"idx {trajectory_index}"
+        ax.set_title(seed_text, fontsize=8)
+        ax.set_xlabel("PC1", fontsize=7)
+        ax.set_ylabel("PC2", fontsize=7)
+        ax.tick_params(labelsize=6)
+        collection_for_colorbar = collection
+
+    if title:
+        fig.suptitle(title, fontsize=10)
+    if collection_for_colorbar is not None:
+        cbar = fig.colorbar(collection_for_colorbar, ax=axes_arr, fraction=0.03, pad=0.02, shrink=0.96, aspect=30)
+        cbar.set_label("local defect", fontsize=8, labelpad=4)
+        cbar.ax.tick_params(labelsize=7, pad=1)
+
+    out_png = Path(out_png)
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_png)
+    if out_pdf:
+        fig.savefig(out_pdf)
+    plt.close(fig)
+
 def plot_defect_profile(
     *,
     defect_csv: str | Path,
     out_png: str | Path,
     out_pdf: str | Path | None = None,
+    defect_matrix_path: str | Path | None = None,
     title: str | None = None,
 ) -> None:
     import matplotlib.pyplot as plt
@@ -786,6 +902,11 @@ def plot_defect_profile(
     x = np.asarray([int(row["interval_index"]) for row in rows], dtype=np.int64)
     y = np.asarray([float(row["defect_mean"]) for row in rows], dtype=np.float64)
     fig, ax = plt.subplots(figsize=(4.8, 2.8), dpi=180, constrained_layout=True)
+    if defect_matrix_path is not None:
+        matrix = np.asarray(load_defect_matrix(defect_matrix_path)["defect_matrix"], dtype=np.float64)
+        lower = np.nanpercentile(matrix, 25, axis=0)
+        upper = np.nanpercentile(matrix, 75, axis=0)
+        ax.fill_between(x, lower, upper, color="#2f6fbb", alpha=0.18, linewidth=0.0, label="25-75% across trajectories")
     ax.plot(x, y, marker="o", markersize=2.4, linewidth=1.25, color="#2f6fbb")
     ax.set_xlabel("interval index")
     ax.set_ylabel("normalized defect")
@@ -794,6 +915,8 @@ def plot_defect_profile(
         tick_step = max(1, int(np.ceil(len(x) / 8)))
         ax.set_xticks(x[::tick_step])
     ax.grid(True, alpha=0.25)
+    if defect_matrix_path is not None:
+        ax.legend(fontsize=7, frameon=False, loc="upper right")
     out_png = Path(out_png)
     out_png.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_png)
@@ -808,15 +931,26 @@ def plot_defect_comparison(
     warp_csv: str | Path,
     out_png: str | Path,
     out_pdf: str | Path | None = None,
+    identity_matrix_path: str | Path | None = None,
+    warp_matrix_path: str | Path | None = None,
 ) -> None:
     import matplotlib.pyplot as plt
 
     id_rows = read_defect_csv(identity_csv)
     warp_rows = read_defect_csv(warp_csv)
     fig, ax = plt.subplots(figsize=(5.0, 3.0), dpi=180, constrained_layout=True)
+    matrix_lookup = {
+        "identity": np.asarray(load_defect_matrix(identity_matrix_path)["defect_matrix"], dtype=np.float64) if identity_matrix_path is not None else None,
+        "dg_twfd_warp": np.asarray(load_defect_matrix(warp_matrix_path)["defect_matrix"], dtype=np.float64) if warp_matrix_path is not None else None,
+    }
     for label, rows, color in [("identity", id_rows, "#4c78a8"), ("dg_twfd_warp", warp_rows, "#f58518")]:
         x = np.asarray([int(row["interval_index"]) for row in rows], dtype=np.int64)
         y = np.asarray([float(row["defect_mean"]) for row in rows], dtype=np.float64)
+        matrix = matrix_lookup[label]
+        if matrix is not None:
+            lower = np.nanpercentile(matrix, 25, axis=0)
+            upper = np.nanpercentile(matrix, 75, axis=0)
+            ax.fill_between(x, lower, upper, color=color, alpha=0.12, linewidth=0.0)
         ax.plot(x, y, marker="o", markersize=2.4, linewidth=1.25, label=label, color=color)
     ax.set_xlabel("interval index")
     ax.set_ylabel("normalized defect")
