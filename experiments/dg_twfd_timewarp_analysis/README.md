@@ -54,14 +54,23 @@ Lower is more uniform.
 ## Visualization
 
 The trajectory figure flattens saved states and projects them to 2D with PCA.
-The path is colored by local defect heat. A few time-point indices are labeled
-on the curve, with only sparse labels to avoid overlap.
+The path is colored by local defect heat. The plotting code now labels the
+endpoints of `8` coarse sections over the default `64` bins, so the marked
+time-point indices are `0, 8, 16, ..., 64`. This matches `8` equal sections of
+the defect profile rather than the older sparse `8`-point heuristic that
+visually looked like `7` gaps.
 
 The intended visual story is:
 
 - `identity`: linear sigma points allocate steps poorly; defect heat is uneven.
 - `dg_twfd_warp`: rho schedule plus defect-derived warp places more points near
   difficult intervals; defect heat should look more balanced.
+
+The comparison script does not simply visualize trajectory `0`. It selects one
+trajectory deterministically from the fixed seed pool by maximizing the average
+state-space gap between the identity and warped schedules for the same seed.
+This keeps the selection reproducible while making the schedule difference more
+visible in the paper figure.
 
 ## Setup
 
@@ -169,10 +178,16 @@ results/defect_identity.csv
 results/defect_dg_twfd_warp.csv
 results/defect_summary.csv
 results/summary.md
+results/trajectory_figure_manifest.json
 ```
 
 Use this set to argue: after time parameterization, defect is more uniform and
 sampling points are allocated more reasonably along the trajectory.
+
+`trajectory_figure_manifest.json` stores the figure-facing configuration details
+for the selected trajectory, including the selected seed, sigma range, `rho`,
+label-section setting, and short paper-ready notes for the identity and warped
+trajectory figures.
 
 ## Command 5: FID Sweep For Final Samples
 

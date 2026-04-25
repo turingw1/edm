@@ -652,6 +652,32 @@ def pca_2d(states: torch.Tensor, *, trajectory_index: int = 0) -> np.ndarray:
     return x @ vt[:2].T
 
 
+def schedule_gap_scores(identity_states: torch.Tensor, warp_states: torch.Tensor) -> np.ndarray:
+    if identity_states.shape != warp_states.shape:
+        raise ValueError("identity_states and warp_states must share the same shape")
+    diff = (identity_states - warp_states).to(torch.float32).square().flatten(2).mean(dim=2).mean(dim=1)
+    return diff.detach().cpu().numpy().astype(np.float64)
+
+
+def select_trajectory_index(
+    *,
+    identity_states: torch.Tensor,
+    warp_states: torch.Tensor,
+    mode: str = "max_schedule_gap",
+) -> tuple[int, dict]:
+    if mode == "first":
+        return 0, {"selection_mode": mode, "selection_score": 0.0}
+    if mode != "max_schedule_gap":
+        raise ValueError(f"Unsupported trajectory selection mode: {mode}")
+    scores = schedule_gap_scores(identity_states, warp_states)
+    index = int(np.nanargmax(scores))
+    return index, {
+        "selection_mode": mode,
+        "selection_score": float(scores[index]),
+        "selection_score_name": "mean_state_mse_between_schedules",
+    }
+
+
 def read_defect_csv(path: str | Path) -> list[dict]:
     with Path(path).open("r", newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
@@ -672,6 +698,7 @@ def plot_trajectory_2d(
     out_png: str | Path,
     out_pdf: str | Path | None = None,
     trajectory_index: int = 0,
+    label_sections: int = 8,
     title: str | None = None,
 ) -> None:
     import matplotlib.pyplot as plt
@@ -689,7 +716,7 @@ def plot_trajectory_2d(
     segment_values = np.asarray([defects[min(i, len(defects) - 1)] for i in range(len(coords) - 1)], dtype=np.float64)
     segments = np.stack([coords[:-1], coords[1:]], axis=1)
 
-    fig, ax = plt.subplots(figsize=(4.4, 3.45), dpi=180, constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(4.55, 3.4), dpi=180, constrained_layout=True)
     finite_values = segment_values[np.isfinite(segment_values)]
     if finite_values.size:
         vmin, vmax = np.percentile(finite_values, [5, 95])
@@ -704,17 +731,31 @@ def plot_trajectory_2d(
     ax.scatter(coords[:, 0], coords[:, 1], color="white", edgecolor="black", linewidth=0.25, s=10, zorder=3)
     ax.annotate("start", xy=coords[0], xytext=(5, 5), textcoords="offset points", fontsize=7)
     ax.annotate("end", xy=coords[-1], xytext=(5, -10), textcoords="offset points", fontsize=7)
-    label_indices = np.unique(np.linspace(0, len(coords) - 1, num=min(8, len(coords)), dtype=np.int64))
+    if label_sections < 1:
+        raise ValueError("label_sections must be positive")
+    label_indices = np.unique(
+        np.round(np.linspace(0, len(coords) - 1, num=min(label_sections + 1, len(coords)), dtype=np.float64)).astype(np.int64)
+    )
     for label_index in label_indices:
         if label_index in {0, len(coords) - 1}:
             continue
-        offset_y = 7 if int(label_index) % 2 == 0 else -10
+        prev_idx = max(int(label_index) - 1, 0)
+        next_idx = min(int(label_index) + 1, len(coords) - 1)
+        tangent = coords[next_idx] - coords[prev_idx]
+        tangent_norm = np.linalg.norm(tangent)
+        if tangent_norm < 1.0e-12:
+            normal = np.asarray([0.0, 1.0], dtype=np.float64)
+        else:
+            tangent = tangent / tangent_norm
+            normal = np.asarray([-tangent[1], tangent[0]], dtype=np.float64)
+        sign = 1.0 if ((int(label_index) // max(1, len(coords) // label_sections)) % 2 == 0) else -1.0
+        offset = normal * (10.0 * sign)
         ax.annotate(
             str(int(label_index)),
             xy=coords[label_index],
-            xytext=(5, offset_y),
+            xytext=(float(offset[0]), float(offset[1])),
             textcoords="offset points",
-            fontsize=6,
+            fontsize=5.8,
             color="black",
             bbox={"boxstyle": "round,pad=0.12", "fc": "white", "ec": "none", "alpha": 0.65},
         )
@@ -722,8 +763,9 @@ def plot_trajectory_2d(
     ax.set_xlabel("PC1")
     ax.set_ylabel("PC2")
     ax.set_title(title or f"{metadata.get('time_param', 'trajectory')} trajectory", fontsize=9)
-    cbar = fig.colorbar(collection, ax=ax)
-    cbar.set_label("local defect")
+    cbar = fig.colorbar(collection, ax=ax, fraction=0.055, pad=0.035, shrink=0.94, aspect=28)
+    cbar.set_label("local defect", fontsize=8, labelpad=4)
+    cbar.ax.tick_params(labelsize=7, pad=1)
     out_png = Path(out_png)
     out_png.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_png)

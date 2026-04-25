@@ -25,6 +25,7 @@ from utils.timewarp_core import (  # noqa: E402
     save_schedule_csv,
     save_trajectory,
     schedule_for_time_param,
+    select_trajectory_index,
     write_defect_csv,
     write_json,
     write_summary_csv,
@@ -38,7 +39,18 @@ def format_value(value) -> str:
         return ""
 
 
-def write_summary_md(path: Path, *, summaries: list[dict], figure_dir: Path, result_dir: Path) -> None:
+def write_summary_md(
+    path: Path,
+    *,
+    summaries: list[dict],
+    figure_dir: Path,
+    result_dir: Path,
+    config_snapshot: dict,
+    selected_seed: int | None = None,
+    selected_index: int | None = None,
+    selection_mode: str | None = None,
+    label_sections: int = 8,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     by_name = {row["time_param"]: row for row in summaries}
     identity = by_name.get("identity", {})
@@ -50,6 +62,22 @@ def write_summary_md(path: Path, *, summaries: list[dict], figure_dir: Path, res
     with path.open("w", encoding="utf-8") as f:
         f.write("# DG-TWFD Timewarp Defect Analysis\n\n")
         f.write("This is a teacher-side EDM trajectory analysis; no student model is trained.\n\n")
+        f.write("## Paper-Ready Setup Summary\n\n")
+        f.write(
+            f"- Dataset: `{config_snapshot['dataset']}`; checkpoint: `{config_snapshot['checkpoint']}`.\n"
+        )
+        f.write(
+            f"- Trajectories: `{config_snapshot['num_trajectories']}` seeds starting from `{config_snapshot['first_seed']}`; "
+            f"default analysis uses `{config_snapshot['num_steps']}` intervals over sigma range "
+            f"`[{config_snapshot['sigma_max']}, {config_snapshot['sigma_min']}]`.\n"
+        )
+        f.write(
+            f"- `identity`: linear sigma spacing; `dg_twfd_warp`: EDM rho schedule with `rho={config_snapshot['rho']}` "
+            "followed by defect-derived monotone reallocation.\n"
+        )
+        f.write(
+            "- Defect is the midpoint composition defect under deterministic EDM Heun transitions, normalized by local update magnitude.\n\n"
+        )
         f.write("| time_param | mean defect | std defect | max defect | min defect | std/mean |\n")
         f.write("|---|---:|---:|---:|---:|---:|\n")
         for row in summaries:
@@ -66,6 +94,17 @@ def write_summary_md(path: Path, *, summaries: list[dict], figure_dir: Path, res
                 f"{format_value(warp.get('defect_uniformity_ratio'))} vs "
                 f"{format_value(identity.get('defect_uniformity_ratio'))} for identity.\n\n"
             )
+        if selected_index is not None and selected_seed is not None:
+            f.write(
+                "The trajectory heatmaps use the same fixed seed under both schedules. "
+                f"Selected trajectory index: `{selected_index}` (seed `{selected_seed}`), "
+                f"selection mode: `{selection_mode}`.\n\n"
+            )
+        f.write(
+            f"Time-point labels on the trajectory are plotted at the endpoints of `{label_sections}` coarse sections. "
+            "For the default 64-bin analysis this yields labels at `0, 8, 16, ..., 64`, which matches 8 equal sections "
+            "over 64 interval bins rather than the previous 7-gap sparse heuristic.\n\n"
+        )
         f.write("## Figures\n\n")
         for name in [
             "trajectory_identity.png",
@@ -78,6 +117,21 @@ def write_summary_md(path: Path, *, summaries: list[dict], figure_dir: Path, res
         f.write("\n## Data\n\n")
         for name in ["defect_identity.csv", "defect_dg_twfd_warp.csv", "defect_summary.csv"]:
             f.write(f"- `{result_dir / name}`\n")
+        f.write(f"- `{result_dir / 'trajectory_figure_manifest.json'}`\n")
+
+
+def build_config_snapshot(cfg: dict, *, num_steps: int, num_trajectories: int, seed: int) -> dict:
+    return {
+        "dataset": cfg["dataset"],
+        "checkpoint": cfg["checkpoint"],
+        "num_steps": num_steps,
+        "num_trajectories": num_trajectories,
+        "first_seed": seed,
+        "sigma_min": float(cfg["sigma_min"]),
+        "sigma_max": float(cfg["sigma_max"]),
+        "rho": float(cfg["rho"]),
+        "defect_eps": float(cfg["defect_eps"]),
+    }
 
 
 def main() -> None:
@@ -93,6 +147,18 @@ def main() -> None:
     parser.add_argument("--fp16", action="store_true", help="Enable FP16 network execution.")
     parser.add_argument("--warp-power", type=float, default=None, help="Power applied to identity defect when deriving warp weights.")
     parser.add_argument("--warp-floor", type=float, default=None, help="Minimum weight floor when deriving warp weights.")
+    parser.add_argument(
+        "--trajectory-select",
+        choices=["first", "max_schedule_gap"],
+        default="max_schedule_gap",
+        help="Rule used to choose the visualized trajectory from the fixed seed pool.",
+    )
+    parser.add_argument(
+        "--label-sections",
+        type=int,
+        default=8,
+        help="Number of coarse sections used when labeling trajectory time points.",
+    )
     args = parser.parse_args()
 
     import torch
@@ -117,6 +183,7 @@ def main() -> None:
 
     net = load_edm_network(cfg["checkpoint"], device=device, use_fp16=bool(args.fp16))
     seeds = list(range(seed, seed + num_trajectories))
+    config_snapshot = build_config_snapshot(cfg, num_steps=num_steps, num_trajectories=num_trajectories, seed=seed)
     summaries: list[dict] = []
     trajectories: dict[str, Path] = {}
     defect_csvs: dict[str, Path] = {}
@@ -227,13 +294,71 @@ def main() -> None:
     defect_csvs["dg_twfd_warp"] = warp_csv
 
     write_summary_csv(result_dir / "defect_summary.csv", summaries)
-    write_json(result_dir / "defect_summary.json", {"summaries": summaries})
+    selected_index, selection_meta = select_trajectory_index(
+        identity_states=identity_states,
+        warp_states=warp_states,
+        mode=args.trajectory_select,
+    )
+    selected_seed = seeds[selected_index]
+    write_json(
+        result_dir / "defect_summary.json",
+        {
+            "summaries": summaries,
+            "selected_trajectory_index": selected_index,
+            "selected_seed": selected_seed,
+            "label_sections": args.label_sections,
+            "config_snapshot": config_snapshot,
+            **selection_meta,
+        },
+    )
+    write_json(
+        result_dir / "trajectory_figure_manifest.json",
+        {
+            "dataset": cfg["dataset"],
+            "checkpoint": cfg["checkpoint"],
+            "num_steps": num_steps,
+            "num_trajectories": num_trajectories,
+            "seed_range": [seeds[0], seeds[-1]],
+            "selected_trajectory_index": selected_index,
+            "selected_seed": selected_seed,
+            "selection_mode": args.trajectory_select,
+            "label_sections": args.label_sections,
+            "sigma_min": float(cfg["sigma_min"]),
+            "sigma_max": float(cfg["sigma_max"]),
+            "rho": float(cfg["rho"]),
+            "defect_eps": float(cfg["defect_eps"]),
+            "figures": [
+                {
+                    "figure_id": "trajectory_identity",
+                    "time_param": "identity",
+                    "path": str(figure_dir / "trajectory_identity.png"),
+                    "schedule_description": "linear sigma spacing from sigma_max to sigma_min, followed by the final jump to 0",
+                    "paper_note": (
+                        "Teacher-side EDM trajectory under linear sigma spacing. "
+                        "The selected seed is shared with the warped trajectory so that differences reflect only time allocation."
+                    ),
+                },
+                {
+                    "figure_id": "trajectory_dg_twfd_warp",
+                    "time_param": "dg_twfd_warp",
+                    "path": str(figure_dir / "trajectory_dg_twfd_warp.png"),
+                    "schedule_description": "EDM rho schedule followed by a monotone defect-derived warp",
+                    "paper_note": (
+                        "Teacher-side EDM trajectory under rho-based DG-TWFD-style time reparameterization. "
+                        "Higher-defect intervals receive more resolution while the seed and checkpoint stay fixed."
+                    ),
+                },
+            ],
+        },
+    )
 
     plot_trajectory_2d(
         trajectory_path=trajectories["identity"],
         defect_csv=defect_csvs["identity"],
         out_png=figure_dir / "trajectory_identity.png",
         out_pdf=figure_dir / "trajectory_identity.pdf",
+        trajectory_index=selected_index,
+        label_sections=args.label_sections,
         title="identity trajectory with defect heat",
     )
     plot_trajectory_2d(
@@ -241,6 +366,8 @@ def main() -> None:
         defect_csv=defect_csvs["dg_twfd_warp"],
         out_png=figure_dir / "trajectory_dg_twfd_warp.png",
         out_pdf=figure_dir / "trajectory_dg_twfd_warp.pdf",
+        trajectory_index=selected_index,
+        label_sections=args.label_sections,
         title="DG-TWFD warped trajectory with defect heat",
     )
     plot_defect_profile(
@@ -261,10 +388,24 @@ def main() -> None:
         out_png=figure_dir / "defect_profile_comparison.png",
         out_pdf=figure_dir / "defect_profile_comparison.pdf",
     )
-    write_summary_md(result_dir / "summary.md", summaries=summaries, figure_dir=figure_dir, result_dir=result_dir)
+    write_summary_md(
+        result_dir / "summary.md",
+        summaries=summaries,
+        figure_dir=figure_dir,
+        result_dir=result_dir,
+        config_snapshot=config_snapshot,
+        selected_seed=selected_seed,
+        selected_index=selected_index,
+        selection_mode=args.trajectory_select,
+        label_sections=args.label_sections,
+    )
 
     print(f"Wrote identity trajectory: {trajectories['identity']}")
     print(f"Wrote warped trajectory: {trajectories['dg_twfd_warp']}")
+    print(
+        "Selected visualization trajectory: "
+        f"index={selected_index}, seed={selected_seed}, mode={args.trajectory_select}"
+    )
     print(f"Wrote summary: {result_dir / 'summary.md'}")
     print(f"Wrote figures under: {figure_dir}")
 
