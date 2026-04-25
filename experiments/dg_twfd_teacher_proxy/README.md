@@ -436,15 +436,21 @@ Expected outputs:
 ```text
 experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_fixed_rows.json
 experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_fixed_rows.json
+experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_step_rows.json
+experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_identity_rows.json
+experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_step_rows.json
+experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_identity_rows.json
 ```
 
-### 2. Generate the main candidate figures in order
+### 2. One command to generate everything
 
-Purpose: generate all main candidate figures one after another so they can be
-reviewed together afterward.
+Purpose: generate all candidate figures in one fixed order, including the
+appendix diversity and the dense high-quality gallery.
 
 ```bash
-python experiments/dg_twfd_teacher_proxy/scripts/run_qualitative_suite.py
+python experiments/dg_twfd_teacher_proxy/scripts/run_qualitative_suite.py \
+  --include-diversity \
+  --include-galleries
 ```
 
 This fixed-order suite writes:
@@ -462,29 +468,163 @@ This fixed-order suite writes:
    - CIFAR-10 identity clock vs DG-TWFD
 6. `DG_TWFD_cifar10_step_progression.pdf`
    - CIFAR-10 DG-TWFD progression only
-
-### 3. Optional appendix diversity figure
-
-Purpose: add the fixed-step diversity grid after the main candidates are
-already generated.
-
-```bash
-python experiments/dg_twfd_teacher_proxy/scripts/run_qualitative_suite.py \
-  --include-diversity
-```
-
-This additionally writes:
-
-- `DG_TWFD_fixed_step_diversity.pdf`
-  - CIFAR-10 diversity check at one stronger actual step count
-
-### 4. Optional subset runs
+7. `DG_TWFD_fixed_step_diversity.pdf`
+   - CIFAR-10 appendix diversity check
+8. `DG_TWFD_cifar10_dense_gallery.pdf`
+   - CIFAR-10 dense high-quality gallery for large-scale visual inspection
 
 If only one side is needed:
 
 ```bash
 python experiments/dg_twfd_teacher_proxy/scripts/run_qualitative_suite.py --suite imagenet_only
-python experiments/dg_twfd_teacher_proxy/scripts/run_qualitative_suite.py --suite cifar_only
+python experiments/dg_twfd_teacher_proxy/scripts/run_qualitative_suite.py --suite cifar_only --include-diversity --include-galleries
+```
+
+### 3. Per-figure commands
+
+`DG_TWFD_imagenet64_identity_vs_full.pdf`:
+official ImageNet64 sampler, same class comparison across the displayed
+`1/2/4/8` labels.
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_identity_vs_dgtwfd.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_imagenet64_target_ablation.json \
+  --dataset imagenet64 \
+  --figure-id DG_TWFD_imagenet64_identity_vs_full \
+  --steps 32,64,128,256 \
+  --display-labels 1,2,4,8 \
+  --sampler-mode config \
+  --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_identity_rows.json \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/imagenet64 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_imagenet64_identity_vs_full.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_identity_vs_full.json
+```
+
+`DG_TWFD_imagenet64_identity_vs_full_deterministic.pdf`:
+deterministic ImageNet64 refinement view, used to show one class-conditioned
+instance becoming clearer as the actual steps increase.
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_identity_vs_dgtwfd.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_imagenet64_target_ablation.json \
+  --dataset imagenet64 \
+  --figure-id DG_TWFD_imagenet64_identity_vs_full_deterministic \
+  --steps 32,64,128,256 \
+  --display-labels 1,2,4,8 \
+  --sampler-mode deterministic \
+  --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_identity_rows.json \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/imagenet64 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_imagenet64_identity_vs_full_deterministic.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_identity_vs_full_deterministic.json
+```
+
+`DG_TWFD_imagenet64_step_progression.pdf`:
+ImageNet64 DG-TWFD progression only, under the official config sampler.
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_qualitative_grid.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_imagenet64_target_ablation.json \
+  --dataset imagenet64 \
+  --figure-id DG_TWFD_imagenet64_step_progression \
+  --method dg_twfd \
+  --steps 32,64,128,256 \
+  --display-labels 1,2,4,8 \
+  --sampler-mode config \
+  --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_step_rows.json \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/imagenet64 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_imagenet64_step_progression.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_step_progression.json
+```
+
+`DG_TWFD_imagenet64_step_progression_deterministic.pdf`:
+deterministic ImageNet64 DG-TWFD progression only.
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_qualitative_grid.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_imagenet64_target_ablation.json \
+  --dataset imagenet64 \
+  --figure-id DG_TWFD_imagenet64_step_progression_deterministic \
+  --method dg_twfd \
+  --steps 32,64,128,256 \
+  --display-labels 1,2,4,8 \
+  --sampler-mode deterministic \
+  --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_step_rows.json \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/imagenet64 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_imagenet64_step_progression_deterministic.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_imagenet64_step_progression_deterministic.json
+```
+
+`DG_TWFD_cifar10_identity_vs_full.pdf`:
+CIFAR-10 identity clock vs DG-TWFD, with higher actual steps behind the
+displayed `1/2/4/8` labels so the identity row is no longer pure noise.
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_identity_vs_dgtwfd.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_cifar10_target_ablation.json \
+  --dataset cifar10 \
+  --figure-id DG_TWFD_cifar10_identity_vs_full \
+  --steps 24,48,72,96 \
+  --display-labels 1,2,4,8 \
+  --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_identity_rows.json \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/cifar10 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_cifar10_identity_vs_full.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_identity_vs_full.json
+```
+
+`DG_TWFD_cifar10_step_progression.pdf`:
+CIFAR-10 DG-TWFD progression only, using a different fixed seed list from the
+identity-vs panel.
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_qualitative_grid.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_cifar10_target_ablation.json \
+  --dataset cifar10 \
+  --figure-id DG_TWFD_cifar10_step_progression \
+  --method dg_twfd \
+  --steps 16,32,48,64 \
+  --display-labels 1,2,4,8 \
+  --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_step_rows.json \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/cifar10 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/main/DG_TWFD_cifar10_step_progression.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_step_progression.json
+```
+
+`DG_TWFD_fixed_step_diversity.pdf`:
+appendix diversity grid, still at one strong CIFAR-10 setting.
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_fixed_step_diversity.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_cifar10_target_ablation.json \
+  --dataset cifar10 \
+  --figure-id DG_TWFD_fixed_step_diversity \
+  --method dg_twfd \
+  --steps 64 \
+  --display-label 8 \
+  --seeds 0-63 \
+  --grid-cols 8 \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/cifar10 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/appendix/DG_TWFD_fixed_step_diversity.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_fixed_step_diversity.json
+```
+
+`DG_TWFD_cifar10_dense_gallery.pdf`:
+dense high-quality CIFAR-10 gallery for large-scale visual inspection after the
+main candidate figures are generated.
+
+```bash
+python experiments/dg_twfd_teacher_proxy/scripts/render_dense_gallery.py \
+  --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_cifar10_target_ablation.json \
+  --dataset cifar10 \
+  --figure-id DG_TWFD_cifar10_dense_gallery \
+  --method dg_twfd \
+  --steps 96 \
+  --display-label 8 \
+  --sampler-mode config \
+  --seeds 2000-2063 \
+  --grid-cols 8 \
+  --output-root experiments/dg_twfd_teacher_proxy/outputs/cifar10 \
+  --figure-path experiments/dg_twfd_teacher_proxy/figures/appendix/DG_TWFD_cifar10_dense_gallery.pdf \
+  --manifest-path experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_dense_gallery.json
 ```
 
 ## Required Metadata Per Figure

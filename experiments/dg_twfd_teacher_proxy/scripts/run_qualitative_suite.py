@@ -21,6 +21,7 @@ def main() -> None:
     parser.add_argument("--device", default="cuda", help="Torch device passed to child scripts.")
     parser.add_argument("--fp32", action="store_true", help="Disable FP16 execution in child scripts.")
     parser.add_argument("--include-diversity", action="store_true", help="Also render the appendix diversity grid.")
+    parser.add_argument("--include-galleries", action="store_true", help="Also render dense high-quality galleries.")
     parser.add_argument(
         "--suite",
         default="all",
@@ -45,12 +46,6 @@ def main() -> None:
         base
         + [
             "experiments/dg_twfd_teacher_proxy/scripts/prepare_qualitative_manifests.py",
-            "--cifar-seeds",
-            "42,123,314,512,777,1024",
-            "--imagenet-seeds",
-            "7,19,43,87,131,211",
-            "--imagenet-classes",
-            "207,250,281,409,530,751",
             "--outdir",
             manifests_dir,
         ]
@@ -76,7 +71,7 @@ def main() -> None:
                     "--sampler-mode",
                     "config",
                     "--manifest",
-                    f"{manifests_dir}/DG_TWFD_imagenet64_fixed_rows.json",
+                    f"{manifests_dir}/DG_TWFD_imagenet64_identity_rows.json",
                     "--output-root",
                     outputs_im64,
                     "--figure-path",
@@ -99,7 +94,7 @@ def main() -> None:
                     "--sampler-mode",
                     "deterministic",
                     "--manifest",
-                    f"{manifests_dir}/DG_TWFD_imagenet64_fixed_rows.json",
+                    f"{manifests_dir}/DG_TWFD_imagenet64_identity_rows.json",
                     "--output-root",
                     outputs_im64,
                     "--figure-path",
@@ -124,7 +119,7 @@ def main() -> None:
                     "--sampler-mode",
                     "config",
                     "--manifest",
-                    f"{manifests_dir}/DG_TWFD_imagenet64_fixed_rows.json",
+                    f"{manifests_dir}/DG_TWFD_imagenet64_step_rows.json",
                     "--output-root",
                     outputs_im64,
                     "--figure-path",
@@ -149,7 +144,7 @@ def main() -> None:
                     "--sampler-mode",
                     "deterministic",
                     "--manifest",
-                    f"{manifests_dir}/DG_TWFD_imagenet64_fixed_rows.json",
+                    f"{manifests_dir}/DG_TWFD_imagenet64_step_rows.json",
                     "--output-root",
                     outputs_im64,
                     "--figure-path",
@@ -172,11 +167,11 @@ def main() -> None:
                     "--figure-id",
                     "DG_TWFD_cifar10_identity_vs_full",
                     "--steps",
-                    "16,32,48,64",
+                    "24,48,72,96",
                     "--display-labels",
                     "1,2,4,8",
                     "--manifest",
-                    f"{manifests_dir}/DG_TWFD_cifar10_fixed_rows.json",
+                    f"{manifests_dir}/DG_TWFD_cifar10_identity_rows.json",
                     "--output-root",
                     outputs_cifar,
                     "--figure-path",
@@ -199,7 +194,7 @@ def main() -> None:
                     "--display-labels",
                     "1,2,4,8",
                     "--manifest",
-                    f"{manifests_dir}/DG_TWFD_cifar10_fixed_rows.json",
+                    f"{manifests_dir}/DG_TWFD_cifar10_step_rows.json",
                     "--output-root",
                     outputs_cifar,
                     "--figure-path",
@@ -236,6 +231,37 @@ def main() -> None:
                 f"{figures_appendix}/DG_TWFD_fixed_step_diversity.pdf",
                 "--manifest-path",
                 f"{manifests_dir}/DG_TWFD_fixed_step_diversity.json",
+            ]
+        )
+
+    if args.include_galleries and args.suite in {"all", "cifar_only"}:
+        jobs.append(
+            [
+                "experiments/dg_twfd_teacher_proxy/scripts/render_dense_gallery.py",
+                "--config",
+                "experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_cifar10_target_ablation.json",
+                "--dataset",
+                "cifar10",
+                "--figure-id",
+                "DG_TWFD_cifar10_dense_gallery",
+                "--method",
+                "dg_twfd",
+                "--steps",
+                "96",
+                "--display-label",
+                "8",
+                "--sampler-mode",
+                "config",
+                "--seeds",
+                "2000-2063",
+                "--grid-cols",
+                "8",
+                "--output-root",
+                outputs_cifar,
+                "--figure-path",
+                f"{figures_appendix}/DG_TWFD_cifar10_dense_gallery.pdf",
+                "--manifest-path",
+                f"{manifests_dir}/DG_TWFD_cifar10_dense_gallery.json",
             ]
         )
 
