@@ -167,7 +167,7 @@ def main() -> None:
                     "--figure-id",
                     "DG_TWFD_cifar10_identity_vs_full",
                     "--steps",
-                    "24,48,72,96",
+                    "32,64,128,256",
                     "--display-labels",
                     "1,2,4,8",
                     "--manifest",

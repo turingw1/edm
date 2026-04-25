@@ -563,7 +563,7 @@ python experiments/dg_twfd_teacher_proxy/scripts/render_identity_vs_dgtwfd.py \
   --config experiments/dg_twfd_teacher_proxy/configs/DG_TWFD_cifar10_target_ablation.json \
   --dataset cifar10 \
   --figure-id DG_TWFD_cifar10_identity_vs_full \
-  --steps 24,48,72,96 \
+  --steps 32,64,128,256 \
   --display-labels 1,2,4,8 \
   --manifest experiments/dg_twfd_teacher_proxy/manifests/DG_TWFD_cifar10_identity_rows.json \
   --output-root experiments/dg_twfd_teacher_proxy/outputs/cifar10 \
